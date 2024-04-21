@@ -8,19 +8,24 @@ export const maps = new Elysia().group("/ugc", (app) => {
   return app
     .use(authApp)
     .get("/maps/:assetId", async ({ user, params: { assetId } }) => {
-      let token: string | undefined;
-      if (user) {
-        console.log("we hab user");
-        token = (await getSpartanToken(user.id))?.spartanToken;
+      if (!user) {
+        return new Response(null, {
+          status: 401,
+        });
       }
-      const ugcEndpoint = token
-        ? "https://discovery-infiniteugc.svc.halowaypoint.com/hi/maps/" +
-        assetId
-        : "https://www.halowaypoint.com/halo-infinite/ugc/maps/" + assetId;
-      const headers: HeadersInit = {};
-      if (token) {
-        headers["X-343-Authorization-Spartan"] = token;
+
+      const haloTokens = await getSpartanToken(user.id);
+      if (!haloTokens) {
+        return new Response(null, {
+          status: 401,
+        });
       }
+      const ugcEndpoint =
+        "https://discovery-infiniteugc.svc.halowaypoint.com/hi/maps/" + assetId;
+      const headers: HeadersInit = {
+        "X-343-Authorization-Spartan": haloTokens.spartanToken,
+        "343-Clearance": haloTokens.clearanceToken,
+      };
       try {
         console.log(ugcEndpoint);
         const response = await fetch(ugcEndpoint, {
@@ -32,95 +37,81 @@ export const maps = new Elysia().group("/ugc", (app) => {
           throw new Error(`failed to fetch data. Status: ${response.status}`);
         }
 
-        if (token) {
-          return await response.json();
-        }
-
-        const htmlContent = await response.text();
-        const $ = load(htmlContent);
-
-        const scriptTag = $("#__NEXT_DATA__");
-
-        if (scriptTag.length === 0) {
-          throw new Error(
-            "No UGC data found try logging in for better results",
-          );
-        }
-
-        const jsonContent = JSON.parse(scriptTag.html() || "{}");
-        const asset = jsonContent.props?.pageProps?.asset;
-
-        return asset;
+        return await response.json();
       } catch (error) {
         console.error(error);
         throw error;
       }
     })
-    .get("/modes/:assetId", async ({ params: { assetId } }) => {
+    .get("/modes/:assetId", async ({ user, params: { assetId } }) => {
+      if (!user) {
+        return new Response(null, {
+          status: 401,
+        });
+      }
+
+      const haloTokens = await getSpartanToken(user.id);
+      if (!haloTokens) {
+        return new Response(null, {
+          status: 401,
+        });
+      }
+
       const ugcEndpoint =
-        "https://www.halowaypoint.com/halo-infinite/ugc/modes/" + assetId;
+        "https://discovery-infiniteugc.svc.halowaypoint.com/hi/ugcGameVariants/" +
+        assetId;
+      const headers: HeadersInit = {
+        "X-343-Authorization-Spartan": haloTokens.spartanToken,
+        "343-Clearance": haloTokens.clearanceToken,
+      };
       try {
+        console.log(ugcEndpoint);
         const response = await fetch(ugcEndpoint, {
           method: "GET",
-          // headers: {
-          //   "x-343-authorization-spartan": "rst",
-          // },
+          headers: headers,
         });
 
         if (!response.ok) {
           throw new Error(`failed to fetch data. Status: ${response.status}`);
         }
-
-        const htmlContent = await response.text();
-        const $ = load(htmlContent);
-
-        const scriptTag = $("#__NEXT_DATA__");
-
-        if (scriptTag.length === 0) {
-          throw new Error(
-            "No UGC data found try logging in for better results",
-          );
-        }
-
-        const jsonContent = JSON.parse(scriptTag.html() || "{}");
-        const asset = jsonContent.props?.pageProps?.asset;
-
-        return asset;
+        return await response.json();
       } catch (error) {
         console.error(error);
         throw error;
       }
     })
-    .get("/prefabs/:assetId", async ({ params: { assetId } }) => {
+    .get("/prefabs/:assetId", async ({ user, params: { assetId } }) => {
+      if (!user) {
+        return new Response(null, {
+          status: 401,
+        });
+      }
+
+      const haloTokens = await getSpartanToken(user.id);
+      if (!haloTokens) {
+        return new Response(null, {
+          status: 401,
+        });
+      }
+
       const ugcEndpoint =
-        "https://www.halowaypoint.com/halo-infinite/ugc/prefabs/" + assetId;
+        "https://discovery-infiniteugc.svc.halowaypoint.com/hi/prefabs/" +
+        assetId;
+      const headers: HeadersInit = {
+        "X-343-Authorization-Spartan": haloTokens.spartanToken,
+        "343-Clearance": haloTokens.clearanceToken,
+      };
       try {
+        console.log(ugcEndpoint);
         const response = await fetch(ugcEndpoint, {
           method: "GET",
-          // headers: {
-          //   "x-343-authorization-spartan": "rst",
-          // },
+          headers: headers,
         });
 
         if (!response.ok) {
           throw new Error(`failed to fetch data. Status: ${response.status}`);
         }
-
-        const htmlContent = await response.text();
-        const $ = load(htmlContent);
-
-        const scriptTag = $("#__NEXT_DATA__");
-
-        if (scriptTag.length === 0) {
-          throw new Error(
-            "No UGC data found try logging in for better results",
-          );
-        }
-
-        const jsonContent = JSON.parse(scriptTag.html() || "{}");
-        const asset = jsonContent.props?.pageProps?.asset;
-
-        return asset;
+        return await response.json();
       } catch (error) {
         console.error(error);
         throw error;
@@ -129,9 +120,28 @@ export const maps = new Elysia().group("/ugc", (app) => {
 
     .get(
       "/browse",
-      async ({ query: { assetKind, sort, order, page, searchTerm } }) => {
+      async ({ user, query: { assetKind, sort, order, page, searchTerm } }) => {
+        if (!user) {
+          return new Response(null, {
+            status: 401,
+          });
+        }
+
+        const haloTokens = await getSpartanToken(user.id);
+        if (!haloTokens) {
+          return new Response(null, {
+            status: 401,
+          });
+        }
+
+        //const ugcEndpoint =
+        //"https://www.halowaypoint.com/halo-infinite/ugc/browse?";
         const ugcEndpoint =
-          "https://www.halowaypoint.com/halo-infinite/ugc/browse?";
+          "https://discovery-infiniteugc.svc.halowaypoint.com/hi/search?";
+        const headers: HeadersInit = {
+          "X-343-Authorization-Spartan": haloTokens.spartanToken,
+          "343-Clearance": haloTokens.clearanceToken,
+        };
         const queryParams: UgcFetchData = {
           sort: sort ?? "datepublishedutc",
           order: order ?? "desc",
@@ -146,29 +156,17 @@ export const maps = new Elysia().group("/ugc", (app) => {
         try {
           const response = await fetch(
             ugcEndpoint + new URLSearchParams({ ...queryParams }),
+            {
+              method: "GET",
+              headers: headers,
+            },
           );
 
           if (!response.ok) {
             throw new Error(`failed to fetch data. Status: ${response.status}`);
           }
-          const htmlContent = await response.text();
-          const $ = load(htmlContent);
 
-          const scriptTag = $("#__NEXT_DATA__");
-
-          if (scriptTag.length === 0) {
-            throw new Error(
-              "No UGC data found try logging in for better results",
-            );
-          }
-          const jsonContent = JSON.parse(scriptTag.html() || "{}");
-          const results = {
-            results: jsonContent.props?.pageProps?.results,
-            totalPages: jsonContent.props?.pageProps?.totalPages,
-            totalResults: jsonContent.props?.pageProps?.totalResults,
-            pageSize: jsonContent.props?.pageProps?.pageSize,
-          };
-          return results;
+          return await response.json();
         } catch (error) {
           console.error(error);
           throw error;
