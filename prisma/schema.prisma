@@ -60,7 +60,6 @@ model Ugc {
   hasNodeGraph    Boolean
   readOnlyClones  Boolean
   numberOfObjects Int?          @db.UnsignedInt
-  tags            Json?
   files           Json
   contributors    Contributor[]
   authorId        String
@@ -76,6 +75,6 @@ model Contributor {
 
 model Tag {
   id   Int    @id @default(autoincrement())
-  name String
+  name String @unique
   ugc  Ugc[]
 }

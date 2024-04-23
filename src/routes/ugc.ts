@@ -196,7 +196,7 @@ export const maps = new Elysia().group("/ugc", (app) => {
         "343-Clearance": haloTokens.clearanceToken,
       };
       const count: number = 20;
-      let start: number = 15600;
+      let start: number = 0;
       let total: number = -1;
       do {
         const queryParams: UgcFetchData = {
@@ -247,7 +247,7 @@ export const maps = new Elysia().group("/ugc", (app) => {
             }
 
             //create or updaet all the contributors of the map in the database
-            const requests = contributors.map((contributor) =>
+            const contributorRequests = contributors.map((contributor) =>
               client.contributor.upsert({
                 where: { xuid: contributor.xuid },
                 update: {
@@ -259,7 +259,25 @@ export const maps = new Elysia().group("/ugc", (app) => {
                 },
               }),
             );
-            await client.$transaction(requests);
+            await client.$transaction(contributorRequests);
+
+            const trimmedTags: string[] = mapData.Tags.map((tag: string) =>
+              tag.trim().toLowerCase(),
+            );
+            const uniqueTags: string[] = [...new Set(trimmedTags)];
+
+            const tagRequests = uniqueTags.map((tag: string) =>
+              client.tag.upsert({
+                where: { name: tag },
+                update: {
+                  name: tag,
+                },
+                create: {
+                  name: tag,
+                },
+              }),
+            );
+            await client.$transaction(tagRequests);
 
             //create an object to upsert into the database
             const asset: UgcDatabaseData = {
@@ -283,7 +301,11 @@ export const maps = new Elysia().group("/ugc", (app) => {
               hasNodeGraph: mapData.CustomData.HasNodeGraph,
               readOnlyClones: map.ReadOnlyClones,
               numberOfObjects: map.NumberOfObjects,
-              tags: { tags: mapData.Tags } as Prisma.JsonObject,
+              tag: {
+                connect: uniqueTags.map((tag: string) => {
+                  return { name: tag };
+                }),
+              },
               files: {
                 prefix: mapData.Files.Prefix,
                 fileRelativePaths: mapData.Files.FileRelativePaths,
@@ -310,6 +332,7 @@ export const maps = new Elysia().group("/ugc", (app) => {
           }
           total = results.EstimatedTotal;
           start += count;
+          console.log(start);
         } catch (error) {
           console.error(error);
           throw error;
@@ -472,6 +495,9 @@ export interface UgcDatabaseData {
   readOnlyClones: boolean;
   numberOfObjects?: number;
   tags?: Prisma.JsonObject;
+  tag: {
+    connect: { name: string }[];
+  };
   files: Prisma.JsonObject;
   contributors: {
     connect: { xuid: string }[];
