@@ -17,7 +17,7 @@ export const cms = new Elysia().group("/cms", (app) => {
       });
     }
 
-    const appearanceEndpoint = `https://economy.svc.halowaypoint.com/hi/players/xuid(2535471973724234)/customization/appearance`;
+    const appearanceEndpoint = `https://economy.svc.halowaypoint.com/hi/players/xuid(${user.xuid})/customization/appearance`;
     const headers: HeadersInit = {
       "X-343-Authorization-Spartan": haloTokens.spartanToken,
       "343-Clearance": haloTokens.clearanceToken,

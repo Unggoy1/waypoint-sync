@@ -64,6 +64,7 @@ model Ugc {
   files           Json
   contributors    Contributor[]
   authorId        String
+  tag             Tag[]
 }
 
 model Contributor {
@@ -71,4 +72,10 @@ model Contributor {
   gamertag   String
   serviceTag String @db.VarChar(4)
   ugc        Ugc[]
+}
+
+model Tag {
+  id   Int    @id @default(autoincrement())
+  name String
+  ugc  Ugc[]
 }
