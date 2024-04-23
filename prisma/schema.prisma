@@ -52,13 +52,13 @@ model Ugc {
   bookmarks       Int           @db.UnsignedInt
   playsRecent     Int           @db.UnsignedInt
   playsAllTime    Int           @db.UnsignedInt
-  averageRaing    Int           @db.UnsignedTinyInt
+  averageRating   Int           @db.UnsignedTinyInt
   numberOfRatings Int           @db.UnsignedInt
   createdAt       DateTime
   updatedAt       DateTime
   publishedAt     DateTime
   hasNodeGraph    Boolean
-  readOnlyClones  Int           @db.UnsignedTinyInt
+  readOnlyClones  Boolean
   numberOfObjects Int?          @db.UnsignedInt
   tags            Json?
   files           Json
@@ -67,9 +67,8 @@ model Ugc {
 }
 
 model Contributor {
-  xuid       String @id @unique
-  gamertag   String @unique
+  xuid       String @id
+  gamertag   String
   serviceTag String @db.VarChar(4)
-  emblemId   Int    @unique
   ugc        Ugc[]
 }
