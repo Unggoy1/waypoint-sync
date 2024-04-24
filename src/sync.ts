@@ -2,20 +2,31 @@ import { client } from "./lucia";
 import { getSpartanToken } from "./authTools";
 import { Prisma } from "@prisma/client";
 
-async function sync(user, assetKind: AssetKind) {
-  if (!user) {
+export async function waypointSync() {
+  console.log("starting map sync");
+  await sync(AssetKind.Map);
+  console.log("finished map sync");
+  console.log("starting prefab sync");
+  await sync(AssetKind.Prefab);
+  console.log("finished prefab sync");
+  console.log("starting mode sync");
+  await sync(AssetKind.Mode);
+  console.log("finished mode sync");
+}
+
+async function sync(assetKind: AssetKind) {
+  const userId = process.env.CronUser;
+  if (!userId) {
     //TODO make this a log about user not existing
-    return new Response(null, {
-      status: 401,
-    });
+    return;
+    throw new Error(`failed to fetch data`);
   }
 
-  const haloTokens = await getSpartanToken(user.id);
+  const haloTokens = await getSpartanToken(userId);
   if (!haloTokens) {
     //make this a log about tokens issue
-    return new Response(null, {
-      status: 401,
-    });
+    return;
+    throw new Error(`failed to fetch data`);
   }
 
   const headers: HeadersInit = {
@@ -24,7 +35,19 @@ async function sync(user, assetKind: AssetKind) {
   };
 
   //TODO CREATE SYNC MODEL AND GET LAST SYNCED TIME
-  //CREATE TIME VARIABLE HERE. For updating later
+  const waypointSync = await client.waypointSync.findUnique({
+    where: {
+      assetKind: assetKind,
+    },
+  });
+  if (!waypointSync) {
+    //log something here
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const newSyncedAt = new Date();
+  const lastSyncedAt = waypointSync.syncedAt;
   const count: number = 20;
   let start: number = 0;
   let total: number = -1;
@@ -46,6 +69,8 @@ async function sync(user, assetKind: AssetKind) {
         },
       );
       if (!response.ok) {
+        //TODO add logging to say failed to fetch search data. include queryParams
+        return;
         throw new Error(`failed to fetch data. Status: ${response.status}`);
       }
 
@@ -84,7 +109,7 @@ async function sync(user, assetKind: AssetKind) {
           });
         }
 
-        //create or updaet all the contributors of the map in the database
+        //create or update all the contributors of the map in the database
         const contributorRequests = contributors.map((contributor) =>
           client.contributor.upsert({
             where: { xuid: contributor.xuid },
@@ -170,13 +195,39 @@ async function sync(user, assetKind: AssetKind) {
       }
       total = assetList.EstimatedTotal;
       start += count;
+
+      const updatedAt =
+        assetList.Results[assetList.Results.length - 1].DateModifiedUtc
+          .ISO8601Date;
+      const assetUpdatedAt = new Date(updatedAt);
+      if (lastSyncedAt > assetUpdatedAt) {
+        await client.waypointSync.update({
+          where: {
+            assetKind: assetKind,
+          },
+          data: {
+            syncedAt: newSyncedAt,
+          },
+        });
+        return true;
+        //TODO log that we have finished syncing
+      }
     } catch (error) {
       console.error(error);
+      return;
       throw error;
     }
   } while (start < total || total === -1);
 
-  return { status: "success" };
+  await client.waypointSync.update({
+    where: {
+      assetKind: assetKind,
+    },
+    data: {
+      syncedAt: newSyncedAt,
+    },
+  });
+  return true;
 }
 
 async function getAsset(
@@ -206,6 +257,7 @@ async function getAsset(
     });
 
     if (!response.ok) {
+      //TODO add logging saying failed to get asset, and include asset id, and kind
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
@@ -234,6 +286,7 @@ async function getGamertags(
     );
 
     if (!response.ok) {
+      //TODO add logging saying faild to get gamertags including all xuids
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
@@ -254,6 +307,7 @@ async function getAppearance(xuid: string, headers: HeadersInit) {
       },
     );
     if (!response.ok) {
+      //TODO add logging saying faild to get gamertags including xuid
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 

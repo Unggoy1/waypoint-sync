@@ -20,7 +20,6 @@ export const authApp = new Elysia().derive(
         !hostHeader ||
         !verifyRequestOrigin(originHeader, [hostHeader])
       ) {
-        console.log("we dun goofed with csrf");
         return {
           user: null,
           session: null,
@@ -30,11 +29,8 @@ export const authApp = new Elysia().derive(
 
     // use headers instead of Cookie API to prevent type coercion
     const cookieHeader = context.request.headers.get("Cookie") ?? "";
-    console.log(cookieHeader);
     const sessionId = lucia.readSessionCookie(cookieHeader);
-    console.log(sessionId);
     if (!sessionId) {
-      console.log("we dun goofed generating a session");
       return {
         user: null,
         session: null,
@@ -57,7 +53,6 @@ export const authApp = new Elysia().derive(
         ...sessionCookie.attributes,
       });
     }
-    console.log("we got a session boy so why it no work");
     return {
       user,
       session,

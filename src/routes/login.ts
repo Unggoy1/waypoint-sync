@@ -101,7 +101,6 @@ export const login = new Elysia().group("/login", (app) => {
           if (!xboxUser) {
             throw new Error("Xbox Authentication Error");
           }
-          console.log(xboxUser.spartanToken);
 
           const existingUser = await client.user.findFirst({
             where: {
