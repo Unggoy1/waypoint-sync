@@ -2,22 +2,38 @@ import { client } from "./lucia";
 import { getSpartanToken } from "./authTools";
 import { Prisma } from "@prisma/client";
 
+const reset = "\x1b[0m";
+
+const log = {
+  green: (text: string) => console.log("\x1b[32m" + text + reset),
+  red: (text: string) => console.log("\x1b[31m" + text + reset),
+  blue: (text: string) => console.log("\x1b[34m" + text + reset),
+  yellow: (text: string) => console.log("\x1b[33m" + text + reset),
+};
+const paint = {
+  green: (text: string) => "\x1b[32m" + text + reset,
+  red: (text: string) => "\x1b[31m" + text + reset,
+  blue: (text: string) => "\x1b[34m" + text + reset,
+  yellow: (text: string) => "\x1b[33m" + text + reset,
+  cyan: (text: string) => "\x1b[36m" + text + reset,
+  magenta: (text: string) => "\x1b[35m" + text + reset,
+};
 export async function waypointSync() {
-  console.log("starting map sync");
+  log.blue("starting map sync");
   await sync(AssetKind.Map);
-  console.log("finished map sync");
-  console.log("starting prefab sync");
+  log.blue("finished map sync");
+  log.blue("starting prefab sync");
   await sync(AssetKind.Prefab);
-  console.log("finished prefab sync");
-  console.log("starting mode sync");
+  log.blue("finished prefab sync");
+  log.blue("starting mode sync");
   await sync(AssetKind.Mode);
-  console.log("finished mode sync");
+  log.blue("finished mode sync");
 }
 
 async function sync(assetKind: AssetKind) {
   const userId = process.env.CronUser;
   if (!userId) {
-    //TODO make this a log about user not existing
+    console.log(paint.red("ERROR: "), "Missing userId. Add CronUser to Env");
     return;
     throw new Error(`failed to fetch data`);
   }
@@ -25,6 +41,10 @@ async function sync(assetKind: AssetKind) {
   const haloTokens = await getSpartanToken(userId);
   if (!haloTokens) {
     //make this a log about tokens issue
+    console.log(
+      paint.red("ERROR: "),
+      "Falied to get spartan token. Sign in or fix token refresh logic",
+    );
     return;
     throw new Error(`failed to fetch data`);
   }
@@ -41,7 +61,11 @@ async function sync(assetKind: AssetKind) {
     },
   });
   if (!waypointSync) {
-    //log something here
+    console.log(
+      paint.red("ERROR: "),
+      "Failed obtaining waypoint sync for assetKind: ",
+      paint.yellow(assetKind),
+    );
     return;
     throw new Error(`failed to fetch data`);
   }
@@ -70,6 +94,21 @@ async function sync(assetKind: AssetKind) {
       );
       if (!response.ok) {
         //TODO add logging to say failed to fetch search data. include queryParams
+        console.log(
+          paint.red("ERROR: "),
+          "Failed to fetch url: ",
+          paint.yellow(UgcEndpoints.Search),
+          paint.red("CODE: " + response.status.toString()),
+        );
+        console.log(
+          paint.red("cont... "),
+          "count: ",
+          paint.yellow(count.toString()),
+          "start: ",
+          paint.yellow(start.toString()),
+          "assetKind: ",
+          paint.yellow(assetKind),
+        );
         return;
         throw new Error(`failed to fetch data. Status: ${response.status}`);
       }
@@ -197,10 +236,14 @@ async function sync(assetKind: AssetKind) {
       start += count;
 
       const updatedAt =
-        assetList.Results[assetList.Results.length - 1].DateModifiedUtc
+        assetList.Results[assetList.Results.length - 1].DatePublishedUtc
           .ISO8601Date;
       const assetUpdatedAt = new Date(updatedAt);
       if (lastSyncedAt > assetUpdatedAt) {
+        console.log(
+          paint.blue("INFO: "),
+          "All maps updated to lastSyncedAt time",
+        );
         await client.waypointSync.update({
           where: {
             assetKind: assetKind,
@@ -209,16 +252,22 @@ async function sync(assetKind: AssetKind) {
             syncedAt: newSyncedAt,
           },
         });
+        console.log(
+          paint.blue("INFO: "),
+          "lastSyncedAt time updated with new time: ",
+          paint.green(newSyncedAt.toString()),
+        );
         return true;
         //TODO log that we have finished syncing
       }
     } catch (error) {
-      console.error(error);
+      console.log(paint.red("ERROR: "), error);
       return;
       throw error;
     }
   } while (start < total || total === -1);
 
+  console.log(paint.blue("INFO: "), "All maps updated to start time");
   await client.waypointSync.update({
     where: {
       assetKind: assetKind,
@@ -227,6 +276,12 @@ async function sync(assetKind: AssetKind) {
       syncedAt: newSyncedAt,
     },
   });
+
+  console.log(
+    paint.blue("INFO: "),
+    "lastSyncedAt time updated with new time: ",
+    paint.green(newSyncedAt.toString()),
+  );
   return true;
 }
 
@@ -258,6 +313,11 @@ async function getAsset(
 
     if (!response.ok) {
       //TODO add logging saying failed to get asset, and include asset id, and kind
+      console.log(
+        paint.red("ERROR: "),
+        "Failed to fetch url: ",
+        paint.yellow(endpoint),
+      );
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
@@ -287,6 +347,11 @@ async function getGamertags(
 
     if (!response.ok) {
       //TODO add logging saying faild to get gamertags including all xuids
+      console.log(
+        paint.red("ERROR: "),
+        "Failed to fetch url: ",
+        paint.yellow(UgcEndpoints.Gamertags),
+      );
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
