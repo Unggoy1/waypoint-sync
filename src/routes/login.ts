@@ -8,7 +8,6 @@ import {
   OAuth2RequestError,
 } from "arctic";
 import { generateId } from "lucia";
-import { parseJWT } from "oslo/jwt";
 import { jwtDecode } from "jwt-decode";
 import { entraIdTokenPayload } from "../interface";
 import { refreshSpartanToken } from "../auth";

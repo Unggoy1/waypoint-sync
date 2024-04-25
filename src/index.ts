@@ -1,9 +1,5 @@
 import { Elysia } from "elysia";
-import { maps } from "./routes/ugc";
 import { login } from "./routes/login";
-import { cms } from "./routes/cms";
-import { user } from "./routes/user";
-import { logout } from "./routes/logout";
 import { cors } from "@elysiajs/cors";
 import dotenv from "dotenv";
 import { cron, Patterns } from "@elysiajs/cron";
@@ -55,11 +51,7 @@ const app = new Elysia()
     },
   )
   .get("/", () => "Hello Elysia")
-  .use(maps)
-  .use(cms)
   .use(login)
-  .use(user)
-  .use(logout)
   .listen(PORT);
 
 console.log(
