@@ -14,10 +14,10 @@ export async function getSpartanToken(userId: string) {
   const time: Date = new Date();
 
   // Calculate the time 5 minutes from now
-  const currentTime: Date = new Date(time.getTime() - 5 * 60000); // 5 minutes in milliseconds
+  const currentTime: Date = new Date(time.getTime() + 5 * 60000); // 5 minutes in milliseconds
 
   // Check if `prismaDatetime` is before `fiveMinutesFromNow`
-  if (oauth.spartanToken && oauth.spartanTokenExpiresAt > currentTime) {
+  if (oauth.spartanToken && oauth.spartanTokenExpiresAt < currentTime) {
     try {
       const tokens = await refreshSpartanToken(oauth.refreshToken);
 
