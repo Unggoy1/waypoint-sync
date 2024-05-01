@@ -125,19 +125,29 @@ async function sync(assetKind: AssetKind) {
         const contributorXuids = assetData.Contributors.filter(
           (contributor: string) => !contributor.startsWith("aaid"),
         );
-        const gamertags = await getGamertags(contributorXuids, headers);
+        const gamertags = await getGamertags(
+          contributorXuids,
+          headers,
+          assetSummary.AssetId,
+        );
 
         const contributors: {
           xuid: string;
           gamertag: string;
           serviceTag: string;
+          emblemPath: string;
         }[] = [];
         for (const gamertag of gamertags) {
-          const serviceTag = await getAppearance(gamertag.xuid, headers);
+          const appearance = await getAppearance(
+            gamertag.xuid,
+            headers,
+            assetSummary.AssetId,
+          );
           contributors.push({
             xuid: gamertag.xuid,
             gamertag: gamertag.gamertag,
-            serviceTag: serviceTag,
+            serviceTag: appearance.serviceTag,
+            emblemPath: appearance.emblemPath,
           });
         }
         if (contributors.length < assetData.Contributors) {
@@ -145,6 +155,7 @@ async function sync(assetKind: AssetKind) {
             xuid: "343",
             gamertag: "343 Industries",
             serviceTag: "343i",
+            emblemPath: "343other_343_industries_emblem.png",
           });
         }
 
@@ -262,6 +273,7 @@ async function sync(assetKind: AssetKind) {
       }
     } catch (error) {
       console.log(paint.red("ERROR: "), error);
+      log.red("ERROR START COUNT: " + start);
       return;
       throw error;
     }
@@ -317,6 +329,8 @@ async function getAsset(
         paint.red("ERROR: "),
         "Failed to fetch url: ",
         paint.yellow(endpoint),
+        " AssetId: ",
+        paint.yellow(assetId),
       );
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
@@ -331,6 +345,7 @@ async function getAsset(
 async function getGamertags(
   xuids: string[],
   headers: HeadersInit,
+  assetId: string,
 ): Promise<gamertagData[]> {
   try {
     const rawXuids = xuids.map((xuid) => {
@@ -351,6 +366,10 @@ async function getGamertags(
         paint.red("ERROR: "),
         "Failed to fetch url: ",
         paint.yellow(UgcEndpoints.Gamertags),
+        " AssetId: ",
+        paint.yellow(assetId),
+        paint.red(" xuids: "),
+        xuids,
       );
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
@@ -362,7 +381,11 @@ async function getGamertags(
   }
 }
 
-async function getAppearance(xuid: string, headers: HeadersInit) {
+async function getAppearance(
+  xuid: string,
+  headers: HeadersInit,
+  assetId: string,
+) {
   try {
     const response = await fetch(
       UgcEndpoints.Appearance1 + `xuid(${xuid})` + UgcEndpoints.Appearance2,
@@ -372,12 +395,46 @@ async function getAppearance(xuid: string, headers: HeadersInit) {
       },
     );
     if (!response.ok) {
+      console.log(
+        paint.red("ERROR: "),
+        "assetId: ",
+        paint.yellow(assetId),
+        " xuid: ",
+        paint.yellow(xuid),
+      );
       //TODO add logging saying faild to get gamertags including xuid
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
     const result = await response.json();
-    return result.Appearance.ServiceTag;
+
+    const emblemResponse = await fetch(
+      UgcEndpoints.Emblem + result.Appearance.Emblem.EmblemPath,
+      {
+        method: "GET",
+        headers: headers,
+      },
+    );
+
+    if (!emblemResponse.ok) {
+      //TODO add logging saying faild to get gamertags including xuid
+      console.log(
+        paint.red("ERROR: "),
+        "assetId: ",
+        paint.yellow(assetId),
+        " xuid: ",
+        paint.yellow(xuid),
+        " emblemPath: ",
+        paint.green(result.Appearance.Emblem.EmblemPath),
+      );
+      throw new Error(`failed to fetch data. Status: ${response.status}`);
+    }
+    const emblem = await emblemResponse.json();
+
+    return {
+      serviceTag: result.Appearance.ServiceTag,
+      emblemPath: emblem.CommonData.DisplayPath.Media.MediaUrl.Path,
+    };
   } catch (error) {
     console.error(error);
     throw error;
@@ -392,6 +449,7 @@ export enum UgcEndpoints {
   Gamertags = "https://profile.svc.halowaypoint.com/users?", //users?xuids=2533274909496686,2533274863053811,2535457072823357
   Appearance1 = "https://economy.svc.halowaypoint.com/hi/players/", //xuid(${user.xuid})/customization/apperance
   Appearance2 = "/customization",
+  Emblem = "https://gamecms-hacs.svc.halowaypoint.com/hi/progression/file/", //Inventory/Spartan/Emblems/blah.json
 }
 
 export enum AssetKind {
