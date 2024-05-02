@@ -1,5 +1,6 @@
 import { client } from "./lucia";
 import { refreshSpartanToken } from "./auth";
+import * as Sentry from "@sentry/bun";
 
 export async function getSpartanToken(userId: string) {
   let oauth = await client.oauth.findFirst({
@@ -33,6 +34,7 @@ export async function getSpartanToken(userId: string) {
         },
       });
     } catch (error) {
+      Sentry.captureException(error);
       return undefined;
       //TODO figure out best way to handle this error and inform the user that they need to log into our app again.
       //In theory this should never happen if we set our session lifespan to the same exact lifespan of the refresh token

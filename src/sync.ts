@@ -1,6 +1,7 @@
 import { client } from "./lucia";
 import { getSpartanToken } from "./authTools";
 import { Prisma } from "@prisma/client";
+import * as Sentry from "@sentry/bun";
 
 const reset = "\x1b[0m";
 
@@ -10,7 +11,7 @@ const log = {
   blue: (text: string) => console.log("\x1b[34m" + text + reset),
   yellow: (text: string) => console.log("\x1b[33m" + text + reset),
 };
-const paint = {
+export const paint = {
   green: (text: string) => "\x1b[32m" + text + reset,
   red: (text: string) => "\x1b[31m" + text + reset,
   blue: (text: string) => "\x1b[34m" + text + reset,
@@ -19,32 +20,29 @@ const paint = {
   magenta: (text: string) => "\x1b[35m" + text + reset,
 };
 export async function waypointSync() {
-  log.blue("starting map sync");
+  console.log(paint.blue("INFO: "), "Starting map sync");
   await sync(AssetKind.Map);
-  log.blue("finished map sync");
-  log.blue("starting prefab sync");
+  console.log(paint.blue("INFO: "), "Finished map sync");
+  console.log(paint.blue("INFO: "), "Starting prefab sync");
   await sync(AssetKind.Prefab);
-  log.blue("finished prefab sync");
-  log.blue("starting mode sync");
+  console.log(paint.blue("INFO: "), "Finished prefab sync");
+  console.log(paint.blue("INFO: "), "Starting mode sync");
   await sync(AssetKind.Mode);
-  log.blue("finished mode sync");
+  console.log(paint.blue("INFO: "), "Finished mode sync");
 }
 
 async function sync(assetKind: AssetKind) {
+  Sentry.getCurrentScope().setLevel("error");
   const userId = process.env.CronUser;
   if (!userId) {
-    console.log(paint.red("ERROR: "), "Missing userId. Add CronUser to Env");
+    Sentry.captureMessage("Error: Missing userId in ENV");
     return;
     throw new Error(`failed to fetch data`);
   }
 
   const haloTokens = await getSpartanToken(userId);
   if (!haloTokens) {
-    //make this a log about tokens issue
-    console.log(
-      paint.red("ERROR: "),
-      "Falied to get spartan token. Sign in or fix token refresh logic",
-    );
+    Sentry.captureMessage("Error: Failed to get spartan token. Sign in again");
     return;
     throw new Error(`failed to fetch data`);
   }
@@ -54,18 +52,17 @@ async function sync(assetKind: AssetKind) {
     "343-Clearance": haloTokens.clearanceToken,
   };
 
-  //TODO CREATE SYNC MODEL AND GET LAST SYNCED TIME
   const waypointSync = await client.waypointSync.findUnique({
     where: {
       assetKind: assetKind,
     },
   });
   if (!waypointSync) {
-    console.log(
-      paint.red("ERROR: "),
-      "Failed obtaining waypoint sync for assetKind: ",
-      paint.yellow(assetKind),
-    );
+    Sentry.captureMessage("Error: Failed obtaining syncedAt time", {
+      extra: {
+        assetKind: assetKind,
+      },
+    });
     return;
     throw new Error(`failed to fetch data`);
   }
@@ -94,21 +91,13 @@ async function sync(assetKind: AssetKind) {
       );
       if (!response.ok) {
         //TODO add logging to say failed to fetch search data. include queryParams
-        console.log(
-          paint.red("ERROR: "),
-          "Failed to fetch url: ",
-          paint.yellow(UgcEndpoints.Search),
-          paint.red("CODE: " + response.status.toString()),
-        );
-        console.log(
-          paint.red("cont... "),
-          "count: ",
-          paint.yellow(count.toString()),
-          "start: ",
-          paint.yellow(start.toString()),
-          "assetKind: ",
-          paint.yellow(assetKind),
-        );
+        Sentry.captureMessage(`Error: Failed to fetch Search results`, {
+          extra: {
+            endpoint: UgcEndpoints.Search,
+            ...queryParams,
+            code: response.status,
+          },
+        });
         return;
         throw new Error(`failed to fetch data. Status: ${response.status}`);
       }
@@ -117,6 +106,31 @@ async function sync(assetKind: AssetKind) {
 
       //put code here to loop through all the maps and do whatever jazz is needed.
       for (const assetSummary of assetList.Results) {
+        const publishedAtUtc = new Date(
+          assetSummary.DatePublishedUtc.ISO8601Date,
+        );
+        const publishedAt = new Date(publishedAtUtc.getTime() + 5 * 60000);
+        if (lastSyncedAt > publishedAt) {
+          console.log(
+            paint.blue("INFO: "),
+            "Maps from now to syncedAt updated",
+          );
+          await client.waypointSync.update({
+            where: {
+              assetKind: assetKind,
+            },
+            data: {
+              syncedAt: newSyncedAt,
+            },
+          });
+          console.log(
+            paint.blue("INFO: "),
+            "lastSyncedAt time updated with new time: ",
+            paint.green(newSyncedAt.toString()),
+          );
+          return;
+        }
+
         const assetData = await getAsset(
           assetSummary.AssetId,
           assetKind,
@@ -246,40 +260,42 @@ async function sync(assetKind: AssetKind) {
       total = assetList.EstimatedTotal;
       start += count;
 
-      const updatedAt =
-        assetList.Results[assetList.Results.length - 1].DatePublishedUtc
-          .ISO8601Date;
-      const assetUpdatedAt = new Date(updatedAt);
-      if (lastSyncedAt > assetUpdatedAt) {
-        console.log(
-          paint.blue("INFO: "),
-          "All maps updated to lastSyncedAt time",
-        );
-        await client.waypointSync.update({
-          where: {
-            assetKind: assetKind,
-          },
-          data: {
-            syncedAt: newSyncedAt,
-          },
-        });
-        console.log(
-          paint.blue("INFO: "),
-          "lastSyncedAt time updated with new time: ",
-          paint.green(newSyncedAt.toString()),
-        );
-        return true;
-        //TODO log that we have finished syncing
-      }
+      // const updatedAt =
+      //   assetList.Results[assetList.Results.length - 1].DatePublishedUtc
+      //     .ISO8601Date;
+      // const assetUpdatedAt = new Date(updatedAt);
+      // if (lastSyncedAt > assetUpdatedAt) {
+      //   console.log(
+      //     paint.blue("INFO: "),
+      //     "All maps updated to lastSyncedAt time",
+      //   );
+      //   await client.waypointSync.update({
+      //     where: {
+      //       assetKind: assetKind,
+      //     },
+      //     data: {
+      //       syncedAt: newSyncedAt,
+      //     },
+      //   });
+      //   console.log(
+      //     paint.blue("INFO: "),
+      //     "lastSyncedAt time updated with new time: ",
+      //     paint.green(newSyncedAt.toString()),
+      //   );
+      //   return true;
+      // }
     } catch (error) {
-      console.log(paint.red("ERROR: "), error);
-      log.red("ERROR START COUNT: " + start);
+      Sentry.captureException(error, {
+        extra: {
+          start: start,
+        },
+      });
       return;
       throw error;
     }
   } while (start < total || total === -1);
 
-  console.log(paint.blue("INFO: "), "All maps updated to start time");
+  console.log(paint.blue("INFO: "), "Every map updated");
   await client.waypointSync.update({
     where: {
       assetKind: assetKind,
@@ -325,19 +341,20 @@ async function getAsset(
 
     if (!response.ok) {
       //TODO add logging saying failed to get asset, and include asset id, and kind
-      console.log(
-        paint.red("ERROR: "),
-        "Failed to fetch url: ",
-        paint.yellow(endpoint),
-        " AssetId: ",
-        paint.yellow(assetId),
-      );
+      Sentry.captureMessage(`Error: Failed to fetch asset`, {
+        extra: {
+          endpoint: endpoint,
+          code: response.status,
+          assetId: assetId,
+          assetKind: assetKind,
+        },
+      });
+
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
 
     return await response.json();
   } catch (error) {
-    console.error(error);
     throw error;
   }
 }
@@ -361,22 +378,19 @@ async function getGamertags(
     );
 
     if (!response.ok) {
-      //TODO add logging saying faild to get gamertags including all xuids
-      console.log(
-        paint.red("ERROR: "),
-        "Failed to fetch url: ",
-        paint.yellow(UgcEndpoints.Gamertags),
-        " AssetId: ",
-        paint.yellow(assetId),
-        paint.red(" xuids: "),
-        xuids,
-      );
-      throw new Error(`failed to fetch data. Status: ${response.status}`);
+      Sentry.captureMessage(`Error: Failed to fetch gamertags`, {
+        extra: {
+          endpoint: UgcEndpoints.Gamertags,
+          code: response.status,
+          xuids: xuids,
+          assetId: assetId,
+        },
+      });
+      throw new Error(`failed to fetch gamertags. Status: ${response.status}`);
     }
 
     return await response.json();
   } catch (error) {
-    console.error(error);
     throw error;
   }
 }
@@ -395,15 +409,18 @@ async function getAppearance(
       },
     );
     if (!response.ok) {
-      console.log(
-        paint.red("ERROR: "),
-        "assetId: ",
-        paint.yellow(assetId),
-        " xuid: ",
-        paint.yellow(xuid),
-      );
-      //TODO add logging saying faild to get gamertags including xuid
-      throw new Error(`failed to fetch data. Status: ${response.status}`);
+      Sentry.captureMessage(`Error: Failed to fetch appearance`, {
+        extra: {
+          endpoint:
+            UgcEndpoints.Appearance1 +
+            `xuid(${xuid})` +
+            UgcEndpoints.Appearance2,
+          code: response.status,
+          xuid: xuid,
+          assetId: assetId,
+        },
+      });
+      throw new Error(`failed to fetch apperance. Status: ${response.status}`);
     }
 
     const result = await response.json();
@@ -417,16 +434,15 @@ async function getAppearance(
     );
 
     if (!emblemResponse.ok) {
-      //TODO add logging saying faild to get gamertags including xuid
-      console.log(
-        paint.red("ERROR: "),
-        "assetId: ",
-        paint.yellow(assetId),
-        " xuid: ",
-        paint.yellow(xuid),
-        " emblemPath: ",
-        paint.green(result.Appearance.Emblem.EmblemPath),
-      );
+      Sentry.captureMessage(`Error: Failed to fetch emblem`, {
+        extra: {
+          endpoint: UgcEndpoints.Emblem,
+          emblemPath: result.Appearance.Emblem.EmblemPath,
+          code: response.status,
+          xuid: xuid,
+          assetId: assetId,
+        },
+      });
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
     const emblem = await emblemResponse.json();
@@ -436,7 +452,6 @@ async function getAppearance(
       emblemPath: emblem.CommonData.DisplayPath.Media.MediaUrl.Path,
     };
   } catch (error) {
-    console.error(error);
     throw error;
   }
 }
