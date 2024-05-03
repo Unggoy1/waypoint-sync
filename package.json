@@ -5,7 +5,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "npx prisma generate",
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts",
+    "build": "bun build src/index.ts --target bun",
     "start": "NODE_ENV=production bun src/index.ts"
   },
   "dependencies": {
