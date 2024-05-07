@@ -446,10 +446,14 @@ async function getAppearance(
       throw new Error(`failed to fetch data. Status: ${response.status}`);
     }
     const emblem = await emblemResponse.json();
-
+    let emblemPath = emblem.CommonData.DisplayPath.Media.MediaUrl.Path;
+    const fixedEmblemPath =
+      emblemPath != ""
+        ? emblemPath.replace(/^progression\/Inventory\//, "")
+        : "Emblems/classics_one_emblem.png";
     return {
       serviceTag: result.Appearance.ServiceTag,
-      emblemPath: emblem.CommonData.DisplayPath.Media.MediaUrl.Path,
+      emblemPath: fixedEmblemPath.toLowerCase(),
     };
   } catch (error) {
     throw error;
