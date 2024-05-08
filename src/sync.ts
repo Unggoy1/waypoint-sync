@@ -31,6 +31,133 @@ export async function waypointSync() {
   console.log(paint.blue("INFO: "), "Finished mode sync");
 }
 
+async function syncDelete(assetKind: AssetKind) {
+  Sentry.getCurrentScope().setLevel("error");
+  const userId = process.env.CronUser;
+  if (!userId) {
+    Sentry.captureMessage("Error: Missing userId in ENV");
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const haloTokens = await getSpartanToken(userId);
+  if (!haloTokens) {
+    Sentry.captureMessage("Error: Failed to get spartan token. Sign in again");
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const headers: HeadersInit = {
+    "X-343-Authorization-Spartan": haloTokens.spartanToken,
+    "343-Clearance": haloTokens.clearanceToken,
+  };
+
+  const waypointSync = await client.waypointSync.findUnique({
+    where: {
+      assetKind: assetKind,
+    },
+  });
+  if (!waypointSync) {
+    Sentry.captureMessage("Error: Failed obtaining syncedAt time", {
+      extra: {
+        assetKind: assetKind,
+      },
+    });
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const newSyncedAt = new Date();
+  const lastSyncedAt = waypointSync.syncedAt;
+  const count: number = 20;
+  let start: number = 0;
+  let total: number = -1;
+  let firstTotal: number = -1;
+  let assetIds: string[] = [];
+  do {
+    const queryParams: UgcFetchData = {
+      sort: "DatePublishedUtc",
+      order: "Desc",
+      count: count.toString(),
+      start: start.toString(),
+      assetKind: assetKind,
+    };
+
+    try {
+      const response = await fetch(
+        UgcEndpoints.Search + new URLSearchParams({ ...queryParams }),
+        {
+          method: "GET",
+          headers: headers,
+        },
+      );
+      if (!response.ok) {
+        //TODO add logging to say failed to fetch search data. include queryParams
+        Sentry.captureMessage(`Error: Failed to fetch Search results`, {
+          extra: {
+            endpoint: UgcEndpoints.Search,
+            ...queryParams,
+            code: response.status,
+          },
+        });
+        return;
+        throw new Error(`failed to fetch data. Status: ${response.status}`);
+      }
+
+      const assetList = await response.json();
+
+      for (const asset of assetList.Results) {
+        assetIds.push(asset.AssetId);
+      }
+
+      total = assetList.EstimatedTotal;
+      firstTotal = start === 0 ? assetList.EstimatedTotal : firstTotal;
+      start += count;
+    } catch (error) {
+      Sentry.captureException(error, {
+        extra: {
+          start: start,
+        },
+      });
+      return;
+    }
+  } while (start < total || total === -1);
+
+  const results = await client.ugc.findMany({
+    where: {
+      assetKind: 2,
+      assetId: {
+        notIn: assetIds,
+      },
+    },
+    select: {
+      assetId: true,
+    },
+  });
+
+  console.log(results);
+
+  console.log("FIRST TOTAL: ", firstTotal);
+  console.log("FINAL TOTAL: ", total);
+  console.log("AssetIds LENGTH: ", assetIds.length);
+  console.log(paint.blue("INFO: "), "Every map updated");
+  // await client.waypointSync.update({
+  //   where: {
+  //     assetKind: assetKind,
+  //   },
+  //   data: {
+  //     syncedAt: newSyncedAt,
+  //   },
+  // });
+
+  console.log(
+    paint.blue("INFO: "),
+    "lastSyncedAt time updated with new time: ",
+    paint.green(newSyncedAt.toString()),
+  );
+  return true;
+}
+
 async function sync(assetKind: AssetKind) {
   Sentry.getCurrentScope().setLevel("error");
   const userId = process.env.CronUser;
