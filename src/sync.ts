@@ -126,15 +126,17 @@ async function syncDelete(assetKind: AssetKind) {
   const results = await client.ugc.findMany({
     where: {
       assetKind: 2,
-      assetId: {
-        notIn: assetIds,
-      },
+      // assetId: {
+      //   notIn: assetIds,
+      // },
     },
     select: {
       assetId: true,
     },
   });
 
+  const testt = results.map((t) => t.assetId);
+  const logg = assetIds.filter((itemA) => !testt.includes(itemA));
   console.log(results);
 
   console.log("FIRST TOTAL: ", firstTotal);
