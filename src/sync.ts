@@ -400,9 +400,6 @@ async function sync(assetKind: AssetKind) {
       total = assetList.EstimatedTotal;
       start += count;
 
-      if (start % 100 === 0) {
-        console.log(start);
-      }
       // const updatedAt =
       //   assetList.Results[assetList.Results.length - 1].DatePublishedUtc
       //     .ISO8601Date;
