@@ -26,7 +26,7 @@ const app = new Elysia()
   .use(
     cron({
       name: "waypointSyncJob",
-      pattern: Patterns.everyWeekOn(6, "00:10"),
+      pattern: Patterns.everyMinutes(30),
       run: async () => {
         const date = new Date();
         console.log(

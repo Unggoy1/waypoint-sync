@@ -65,7 +65,7 @@ model Ugc {
   files           Json
   contributors    Contributor[] @relation("ContributorToUgc") 
   author     Contributor? @relation("Author", references: [xuid], fields: [authorId] )
-  authorId        String?
+  authorId        String
   tag             Tag[]
   playlist        Playlist[]
 }
