@@ -26,7 +26,7 @@ const app = new Elysia()
   .use(
     cron({
       name: "waypointSyncJob",
-      pattern: Patterns.everyMinutes(30),
+      pattern: Patterns.everyWeekOn(6, "00:10"),
       run: async () => {
         const date = new Date();
         console.log(
@@ -62,7 +62,7 @@ const app = new Elysia()
       return time?.toString();
     },
   )
-  .get("/error", ({ }) => {
+  .get("/error", ({}) => {
     try {
       throw new Error("Sentry Bun Test");
     } catch (e) {

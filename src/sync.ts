@@ -266,8 +266,14 @@ async function sync(assetKind: AssetKind) {
           headers,
         );
         const contributorXuids = assetData.Contributors.filter(
-          (contributor: string) => !contributor.startsWith("aaid"),
+          (contributor: string) => contributor.startsWith("xuid"),
         );
+        if (
+          !contributorXuids.includes(assetData.Admin) &&
+          assetData.Admin.startsWith("xuid")
+        ) {
+          contributorXuids.push(assetData.Admin);
+        }
         const gamertags = await getGamertags(
           contributorXuids,
           headers,
@@ -290,15 +296,20 @@ async function sync(assetKind: AssetKind) {
             xuid: gamertag.xuid,
             gamertag: gamertag.gamertag,
             serviceTag: appearance.serviceTag,
-            emblemPath: appearance.emblemPath,
+            emblemPath: appearance.emblemPath.startsWith("/")
+              ? appearance.emblemPath
+              : "/" + appearance.emblemPath,
           });
         }
-        if (contributors.length < assetData.Contributors) {
+        if (
+          contributors.length < assetData.Contributors ||
+          !assetData.Admin.startsWith("xuid")
+        ) {
           contributors.push({
             xuid: "343",
             gamertag: "343 Industries",
             serviceTag: "343i",
-            emblemPath: "343other_343_industries_emblem.png",
+            emblemPath: "/emblems/343other_343_industries_emblem.png",
           });
         }
 
@@ -371,9 +382,9 @@ async function sync(assetKind: AssetKind) {
               return { xuid: contributor.xuid };
             }),
           },
-          authorId: assetData.Admin.startsWith("aaid")
+          authorId: !assetData.Admin.startsWith("xuid")
             ? "343"
-            : assetData.Admin,
+            : assetData.Admin.substring(5, assetData.Admin.length - 1),
         };
 
         await client.ugc.upsert({
@@ -389,6 +400,9 @@ async function sync(assetKind: AssetKind) {
       total = assetList.EstimatedTotal;
       start += count;
 
+      if (start % 100 === 0) {
+        console.log(start);
+      }
       // const updatedAt =
       //   assetList.Results[assetList.Results.length - 1].DatePublishedUtc
       //     .ISO8601Date;
@@ -598,6 +612,7 @@ export enum UgcEndpoints {
   Appearance1 = "https://economy.svc.halowaypoint.com/hi/players/", //xuid(${user.xuid})/customization/apperance
   Appearance2 = "/customization",
   Emblem = "https://gamecms-hacs.svc.halowaypoint.com/hi/progression/file/", //Inventory/Spartan/Emblems/blah.json
+  Recommended = "https://discovery-infiniteugc.svc.halowaypoint.com/hi/projects/712add52-f989-48e1-b3bb-ac7cd8a1c17a",
 }
 
 export enum AssetKind {

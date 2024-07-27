@@ -14,7 +14,7 @@
     "@elysiajs/cron": "^1.0.3",
     "@lucia-auth/adapter-prisma": "beta",
     "@lucia-auth/oauth": "^3.5.0",
-    "@prisma/client": "^5.7.0",
+    "@prisma/client": "^5.13.0",
     "@sentry/bun": "^7.113.0",
     "arctic": "^0.10.0",
     "cheerio": "^1.0.0-rc.12",
@@ -23,7 +23,7 @@
     "jwt-decode": "^4.0.0",
     "lucia": "latest",
     "oslo": "^0.24.0",
-    "prisma": "^5.7.0"
+    "prisma": "^5.13.0"
   },
   "devDependencies": {
     "bun-types": "latest"
