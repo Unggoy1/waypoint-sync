@@ -29,6 +29,9 @@ export async function waypointSync() {
   console.log(paint.blue("INFO: "), "Starting mode sync");
   await sync(AssetKind.Mode);
   console.log(paint.blue("INFO: "), "Finished mode sync");
+  console.log(paint.blue("INFO: "), "Starting recommended asset sync");
+  await syncRecommended();
+  console.log(paint.blue("INFO: "), "Finished recommended asset sync");
 }
 
 async function syncDelete(assetKind: AssetKind) {
@@ -453,6 +456,117 @@ async function sync(assetKind: AssetKind) {
   return true;
 }
 
+async function syncRecommended() {
+  const userId = process.env.CronUser;
+  if (!userId) {
+    Sentry.captureMessage("Error: Missing userId in ENV");
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const haloTokens = await getSpartanToken(userId);
+  if (!haloTokens) {
+    Sentry.captureMessage("Error: Failed to get spartan token. Sign in again");
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const headers: HeadersInit = {
+    "X-343-Authorization-Spartan": haloTokens.spartanToken,
+    "343-Clearance": haloTokens.clearanceToken,
+  };
+
+  const waypointSync = await client.waypointSync.findUnique({
+    where: {
+      assetKind: AssetKind.Recommended,
+    },
+  });
+  if (!waypointSync) {
+    Sentry.captureMessage("Error: Failed obtaining syncedAt time", {
+      extra: {
+        assetKind: AssetKind.Recommended,
+      },
+    });
+    return;
+    throw new Error(`failed to fetch data`);
+  }
+
+  const newSyncedAt = new Date();
+  const lastSyncedAt = waypointSync.syncedAt;
+
+  try {
+    const response = await fetch(UgcEndpoints.Recommended, {
+      method: "GET",
+      headers: headers,
+    });
+    if (!response.ok) {
+      //TODO add logging to say failed to fetch search data. include queryParams
+      Sentry.captureMessage(`Error: Failed to fetch Search results`, {
+        extra: {
+          endpoint: UgcEndpoints.Search,
+          code: response.status,
+        },
+      });
+      return;
+      throw new Error(`failed to fetch data. Status: ${response.status}`);
+    }
+
+    const recommendedProject = await response.json();
+
+    //Not the proper type of our data, but will do for now
+    interface Link {
+      AssetId: string;
+    }
+    //put code here to loop through all the assets and do whatever jazz is needed.
+    const allAssetIds: string[] = [
+      ...recommendedProject.MapLinks.map((link: Link) => link.AssetId),
+      ...recommendedProject.PlaylistLinks.map((link: Link) => link.AssetId),
+      ...recommendedProject.UgcGameVariantLinks.map(
+        (link: Link) => link.AssetId,
+      ),
+    ];
+
+    // Update records to set featured to true for IDs in the list
+    await client.ugc.updateMany({
+      where: {
+        assetId: { in: allAssetIds },
+      },
+      data: {
+        recommended: true,
+      },
+    });
+
+    // Update records to set booleanField to false for IDs not in the list
+    await client.ugc.updateMany({
+      where: {
+        assetId: { notIn: allAssetIds },
+      },
+      data: {
+        recommended: false,
+      },
+    });
+    console.log(paint.blue("INFO: "), "Recommended assets updated");
+    await client.waypointSync.update({
+      where: {
+        assetKind: AssetKind.Recommended,
+      },
+      data: {
+        syncedAt: newSyncedAt,
+      },
+    });
+
+    console.log(
+      paint.blue("INFO: "),
+      "lastSyncedAt time updated with new time: ",
+      paint.green(newSyncedAt.toString()),
+    );
+    return true;
+  } catch (error) {
+    Sentry.captureException(error, {});
+    return;
+  }
+}
+
 async function getAsset(
   assetId: string,
   assetKind: AssetKind,
@@ -616,6 +730,7 @@ export enum AssetKind {
   Map = "Map",
   Prefab = "Prefab",
   Mode = "UgcGameVariant",
+  Recommended = "Recommended343",
 }
 
 export interface gamertagData {

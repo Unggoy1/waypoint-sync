@@ -62,7 +62,7 @@ const app = new Elysia()
       return time?.toString();
     },
   )
-  .get("/error", ({}) => {
+  .get("/error", ({ }) => {
     try {
       throw new Error("Sentry Bun Test");
     } catch (e) {

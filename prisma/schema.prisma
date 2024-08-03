@@ -16,6 +16,8 @@ model User {
   username String     @unique
   oid      String     @unique
   xuid     String     @unique
+  serviceTag String  @db.VarChar(4)
+  emblemPath String?
   sessions Session[]
   oauth    Oauth?
   Playlist Playlist[]
@@ -63,6 +65,7 @@ model Ugc {
   readOnlyClones  Boolean
   numberOfObjects Int?          @db.UnsignedInt
   files           Json
+  recommended     Boolean       @default(false)
   contributors    Contributor[] @relation("ContributorToUgc") 
   author     Contributor? @relation("Author", references: [xuid], fields: [authorId] )
   authorId        String
@@ -86,10 +89,11 @@ model Tag {
 }
 
 model Playlist {
-  id          String  @id @unique @default(uuid())
+  assetId          String  @id @unique @default(uuid())
   name        String
+  assetKind       Int           @db.UnsignedTinyInt @default(5)
   description String
-  thumbnail   String
+  thumbnailUrl  String
   private     Boolean
   userId      String
   user        User    @relation(references: [id], fields: [userId], onDelete: Cascade)
@@ -104,8 +108,16 @@ model WaypointSync {
   assetKind SyncType @unique
 }
 
+model BetaAccess {
+  gamertag   String  @id @unique
+}
+
 enum SyncType {
   Map
   Prefab
   UgcGameVariant
+  Recommended343
+  MapDeleted
+  PrefabDeleted
+  UgcGameVariantDeleted
 }
