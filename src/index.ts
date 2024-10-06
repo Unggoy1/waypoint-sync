@@ -1,12 +1,11 @@
 import { Elysia } from "elysia";
 import { login } from "./routes/login";
 import { cors } from "@elysiajs/cors";
-import dotenv from "dotenv";
 import { cron, Patterns } from "@elysiajs/cron";
-import { waypointSync, paint } from "./sync";
+import { waypointSync, paint, syncDelete, AssetKind } from "./sync";
 import * as Sentry from "@sentry/bun";
+import { client } from "./lucia";
 
-dotenv.config();
 const PORT = process.env.PORT || 3000;
 
 Sentry.init({
@@ -14,6 +13,10 @@ Sentry.init({
   // Performance Monitoring
   tracesSampleRate: 1.0, // Capture 100% of the transactions
 });
+function everyDayAt(time = "00:00") {
+  const [hours, minutes] = time.split(":");
+  return `${minutes} ${hours} * * *`;
+}
 
 const app = new Elysia()
   .use(
@@ -35,6 +38,23 @@ const app = new Elysia()
           paint.cyan(date.toString()),
         );
         await waypointSync();
+      },
+    }),
+  )
+  .use(
+    cron({
+      name: "waypointDeleteJob",
+      pattern: everyDayAt("18:10"),
+      run: async () => {
+        const date = new Date();
+        console.log(
+          paint.blue("INFO: "),
+          "Starting JOB JOB Cron Job: ",
+          paint.cyan(date.toString()),
+        );
+        await syncDelete(AssetKind.Map);
+        await syncDelete(AssetKind.Prefab);
+        await syncDelete(AssetKind.Mode);
       },
     }),
   )
@@ -62,13 +82,6 @@ const app = new Elysia()
       return time?.toString();
     },
   )
-  .get("/error", ({ }) => {
-    try {
-      throw new Error("Sentry Bun Test");
-    } catch (e) {
-      Sentry.captureException(e);
-    }
-  })
   .get("/", () => "Hello Elysia")
   .use(login)
   .listen(PORT);

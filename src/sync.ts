@@ -2,6 +2,8 @@ import { client } from "./lucia";
 import { getSpartanToken } from "./authTools";
 import { Prisma } from "@prisma/client";
 import * as Sentry from "@sentry/bun";
+import { writeFile } from "fs/promises";
+import { JsonValue } from "@prisma/client/runtime/library";
 
 const reset = "\x1b[0m";
 
@@ -34,7 +36,43 @@ export async function waypointSync() {
   console.log(paint.blue("INFO: "), "Finished recommended asset sync");
 }
 
-async function syncDelete(assetKind: AssetKind) {
+interface Asset {
+  assetId: string;
+  files: JsonValue;
+  // Add other properties if needed
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  maxRetries = 3,
+): Promise<Response> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed for ${url}:`, error);
+    }
+    // Wait before retrying (exponential backoff)
+    await new Promise((resolve) => setTimeout(resolve, Math.pow(2, i) * 1000));
+  }
+  throw new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
+}
+
+async function verifyAsset(assetId: string): Promise<boolean> {
+  try {
+    const res = await fetchWithRetry(
+      `https://www.halowaypoint.com/halo-infinite/ugc/maps/${assetId}`,
+      { method: "HEAD" },
+    );
+    return res.ok;
+  } catch (error) {
+    // console.error(`Failed to verify asset ${assetId}:`, error);
+    return false;
+  }
+}
+export async function syncDelete(assetKind: AssetKind) {
   Sentry.getCurrentScope().setLevel("error");
   const userId = process.env.CronUser;
   if (!userId) {
@@ -126,26 +164,43 @@ async function syncDelete(assetKind: AssetKind) {
     }
   } while (start < total || total === -1);
 
+  const assetKindNumber =
+    assetKind === AssetKind.Map ? 2 : assetKind === AssetKind.Prefab ? 4 : 6;
   const results = await client.ugc.findMany({
     where: {
-      assetKind: 2,
-      // assetId: {
-      //   notIn: assetIds,
-      // },
+      assetKind: assetKindNumber,
+      assetId: {
+        notIn: assetIds,
+      },
     },
     select: {
       assetId: true,
     },
   });
 
-  const testt = results.map((t) => t.assetId);
-  const logg = assetIds.filter((itemA) => !testt.includes(itemA));
-  console.log(results);
+  console.log("results2: ", results.length);
+  const verificationResults = await Promise.all(
+    results.map(async (result) => await verifyAsset(result.assetId)),
+  );
+  const assetIdsToDelete = results.filter(
+    (_, index) => !verificationResults[index],
+  );
 
-  console.log("FIRST TOTAL: ", firstTotal);
-  console.log("FINAL TOTAL: ", total);
-  console.log("AssetIds LENGTH: ", assetIds.length);
-  console.log(paint.blue("INFO: "), "Every map updated");
+  const deleteList = assetIdsToDelete.map((asset) => {
+    return asset.assetId;
+  });
+
+  console.log("BAD RES: ", assetIdsToDelete.length);
+  // console.log("GOOD RES: ", assetIdsToSave.length);
+  await client.ugc.deleteMany({
+    where: {
+      assetId: {
+        in: deleteList,
+      },
+    },
+  });
+
+  console.log(paint.blue("INFO: "), "Synced Deletes for AssetKind");
   // await client.waypointSync.update({
   //   where: {
   //     assetKind: assetKind,

@@ -20,7 +20,8 @@ model User {
   emblemPath String?
   sessions Session[]
   oauth    Oauth?
-  Playlist Playlist[]
+  Playlist Playlist[] @relation("User")
+  favorites Playlist[] @relation("Favorites")
 }
 
 model Oauth {
@@ -71,6 +72,7 @@ model Ugc {
   authorId        String
   tag             Tag[]
   playlist        Playlist[]
+  deletedAt DateTime?
 }
 
 model Contributor {
@@ -90,14 +92,17 @@ model Tag {
 
 model Playlist {
   assetId          String  @id @unique @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   name        String
   assetKind       Int           @db.UnsignedTinyInt @default(5)
   description String
-  thumbnailUrl  String
+  thumbnailUrl  String @default("/placeholder.webp")
   private     Boolean
   userId      String
-  user        User    @relation(references: [id], fields: [userId], onDelete: Cascade)
+  user        User    @relation("User", references: [id], fields: [userId], onDelete: Cascade)
   ugc         Ugc[]
+  favoritedBy       User[]  @relation("Favorites")
 
   @@index([userId])
 }

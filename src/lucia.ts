@@ -3,10 +3,26 @@ import { PrismaAdapter } from "@lucia-auth/adapter-prisma";
 import { PrismaClient } from "@prisma/client";
 import { MicrosoftEntraId } from "arctic";
 import dotenv from "dotenv";
+import { createSoftDeleteMiddleware } from "prisma-soft-delete-middleware";
 
 dotenv.config();
 
 export const client = new PrismaClient();
+
+client.$use(
+  createSoftDeleteMiddleware({
+    models: {
+      Ugc: {
+        field: "deletedAt",
+        createValue: (deleted) => {
+          if (deleted) return new Date();
+          return null;
+        },
+      },
+    },
+  }),
+);
+
 const adapter = new PrismaAdapter(client.session, client.user);
 export const lucia = new Lucia(adapter, {
   getUserAttributes: (attributes) => {
