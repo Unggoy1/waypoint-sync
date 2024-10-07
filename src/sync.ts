@@ -74,7 +74,7 @@ async function verifyAsset(assetId: string): Promise<boolean> {
 }
 export async function syncDelete(assetKind: AssetKind) {
   Sentry.getCurrentScope().setLevel("error");
-  const userId = process.env.CronUser;
+  const userId = process.env.CRON_USER;
   if (!userId) {
     Sentry.captureMessage("Error: Missing userId in ENV");
     return;
@@ -220,7 +220,7 @@ export async function syncDelete(assetKind: AssetKind) {
 
 async function sync(assetKind: AssetKind) {
   Sentry.getCurrentScope().setLevel("error");
-  const userId = process.env.CronUser;
+  const userId = process.env.CRON_USER;
   if (!userId) {
     Sentry.captureMessage("Error: Missing userId in ENV");
     return;
@@ -512,7 +512,7 @@ async function sync(assetKind: AssetKind) {
 }
 
 async function syncRecommended() {
-  const userId = process.env.CronUser;
+  const userId = process.env.CRON_USER;
   if (!userId) {
     Sentry.captureMessage("Error: Missing userId in ENV");
     return;

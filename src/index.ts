@@ -6,7 +6,7 @@ import { waypointSync, paint, syncDelete, AssetKind } from "./sync";
 import * as Sentry from "@sentry/bun";
 import { client } from "./lucia";
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3200;
 
 Sentry.init({
   dsn: "https://63208390aa276259472aeae4886a8de4@o4507187195019264.ingest.us.sentry.io/4507187239780352",
@@ -85,6 +85,14 @@ const app = new Elysia()
   .get("/", () => "Hello Elysia")
   .use(login)
   .listen(PORT);
+
+Sentry.getCurrentScope().setLevel("error");
+const userId = process.env.CRON_USER;
+if (!userId) {
+  Sentry.captureMessage("Error: Missing userId in ENV");
+  console.error(`failed to GET USER FROM ENV`);
+  process.exit(1);
+}
 
 console.log(
   `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`,
