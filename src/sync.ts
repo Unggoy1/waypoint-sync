@@ -146,7 +146,21 @@ export async function syncDelete(assetKind: AssetKind) {
       }
 
       const assetList = await response.json();
+      //this is stupid and probably can be put in the for loop below, but i wanted to test something
+      const updatePromises = assetList.Results.map((result: any) => {
+        safeUpdate(result.AssetId, {
+          favorites: result.Favorites,
+          likes: result.Likes,
+          bookmarks: result.Bookmarks,
+          playsRecent: result.PlaysRecent,
+          playsAllTime: result.PlaysAllTime,
+          averageRating: result.AverageRating,
+          numberOfRatings: result.NumberOfRatings,
+        });
+      });
+      await Promise.all(updatePromises);
 
+      //should i move above into below?
       for (const asset of assetList.Results) {
         assetIds.push(asset.AssetId);
       }
@@ -216,6 +230,25 @@ export async function syncDelete(assetKind: AssetKind) {
     paint.green(newSyncedAt.toString()),
   );
   return true;
+}
+
+async function safeUpdate(assetId: string, data: any) {
+  try {
+    return await client.ugc.update({
+      where: { assetId },
+      data,
+    });
+  } catch (e) {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2025"
+    ) {
+      // Handle the case where the record does not exist
+      // console.log(`Record with ID ${assetId} does not exist.`);
+      return null;
+    }
+    throw e; // Re-throw other errors
+  }
 }
 
 async function sync(assetKind: AssetKind) {
