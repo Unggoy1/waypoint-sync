@@ -44,7 +44,24 @@ const app = new Elysia()
   .use(
     cron({
       name: "waypointDeleteJob",
-      pattern: "10 6,18 * * *",
+      pattern: everyDayAt("18:10"),
+      run: async () => {
+        const date = new Date();
+        console.log(
+          paint.blue("INFO: "),
+          "Starting JOB JOB Cron Job: ",
+          paint.cyan(date.toString()),
+        );
+        await syncDelete(AssetKind.Map);
+        await syncDelete(AssetKind.Prefab);
+        await syncDelete(AssetKind.Mode);
+      },
+    }),
+  )
+  .use(
+    cron({
+      name: "waypointDeleteJob2",
+      pattern: everyDayAt("6:10"),
       run: async () => {
         const date = new Date();
         console.log(

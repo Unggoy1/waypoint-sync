@@ -147,22 +147,32 @@ export async function syncDelete(assetKind: AssetKind) {
 
       const assetList = await response.json();
       //this is stupid and probably can be put in the for loop below, but i wanted to test something
-      const updatePromises = assetList.Results.map((result: any) => {
-        safeUpdate(result.AssetId, {
-          favorites: result.Favorites,
-          likes: result.Likes,
-          bookmarks: result.Bookmarks,
-          playsRecent: result.PlaysRecent,
-          playsAllTime: result.PlaysAllTime,
-          averageRating: result.AverageRating,
-          numberOfRatings: result.NumberOfRatings,
-        });
-      });
-      await Promise.all(updatePromises);
+      //TODO: see if i can get this to work without a connection pool issue
+      // const updatePromises = assetList.Results.map((result: any) => {
+      //   safeUpdate(result.AssetId, {
+      //     favorites: result.Favorites,
+      //     likes: result.Likes,
+      //     bookmarks: result.Bookmarks,
+      //     playsRecent: result.PlaysRecent,
+      //     playsAllTime: result.PlaysAllTime,
+      //     averageRating: result.AverageRating,
+      //     numberOfRatings: result.NumberOfRatings,
+      //   });
+      // });
+      // await Promise.all(updatePromises);
 
-      //should i move above into below?
       for (const asset of assetList.Results) {
         assetIds.push(asset.AssetId);
+
+        await safeUpdate(asset.AssetId, {
+          favorites: asset.Favorites,
+          likes: asset.Likes,
+          bookmarks: asset.Bookmarks,
+          playsRecent: asset.PlaysRecent,
+          playsAllTime: asset.PlaysAllTime,
+          averageRating: asset.AverageRating,
+          numberOfRatings: asset.NumberOfRatings,
+        });
       }
 
       total = assetList.EstimatedTotal;
@@ -377,6 +387,7 @@ async function sync(assetKind: AssetKind) {
           serviceTag: string;
           emblemPath: string;
         }[] = [];
+        let adminGamertagStartsWithNumber = false;
         for (const gamertag of gamertags) {
           const appearance = await getAppearance(
             gamertag.xuid,
@@ -391,10 +402,18 @@ async function sync(assetKind: AssetKind) {
               ? appearance.emblemPath
               : "/" + appearance.emblemPath,
           });
+          // Check if this gamertag belongs to the admin and starts with a number
+          if (
+            gamertag.xuid === assetData.Admin &&
+            /^[0-9]/.test(gamertag.gamertag)
+          ) {
+            adminGamertagStartsWithNumber = true;
+          }
         }
         if (
           contributors.length < assetData.Contributors ||
-          !assetData.Admin.startsWith("xuid")
+          !assetData.Admin.startsWith("xuid") ||
+          adminGamertagStartsWithNumber
         ) {
           contributors.push({
             xuid: "343",
