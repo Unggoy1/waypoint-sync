@@ -60,10 +60,19 @@ async function fetchWithRetry(
   throw new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
 }
 
-async function verifyAsset(assetId: string): Promise<boolean> {
+async function verifyAsset(
+  assetId: string,
+  assetKind: AssetKind,
+): Promise<boolean> {
+  const assetType =
+    assetKind === AssetKind.Map
+      ? "maps"
+      : assetKind === AssetKind.Mode
+        ? "modes"
+        : "prefabs";
   try {
     const res = await fetchWithRetry(
-      `https://www.halowaypoint.com/halo-infinite/ugc/maps/${assetId}`,
+      `https://www.halowaypoint.com/halo-infinite/ugc/${assetType}/${assetId}`,
       { method: "HEAD" },
     );
     return res.ok;
@@ -204,7 +213,7 @@ export async function syncDelete(assetKind: AssetKind) {
 
   console.log("results2: ", results.length);
   const verificationResults = await Promise.all(
-    results.map(async (result) => await verifyAsset(result.assetId)),
+    results.map(async (result) => await verifyAsset(result.assetId, assetKind)),
   );
   const assetIdsToDelete = results.filter(
     (_, index) => !verificationResults[index],
