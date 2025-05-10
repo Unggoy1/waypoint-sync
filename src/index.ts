@@ -6,6 +6,12 @@ import { waypointSync, paint, syncDelete, AssetKind } from "./sync";
 import * as Sentry from "@sentry/bun";
 import { client } from "./lucia";
 
+// IMPORTANT: TEMPORARY CHANGE FOR 2-MONTH BACKFILL
+// After completing the backfill (this will take several days), change the
+// waypointSyncJob cron schedule back to the original every-3-hours pattern:
+// pattern: "10 5,8,11,14,17,20,23,2 * * *"
+// The current schedule runs only 3 times per day to allow longer sync windows
+
 const PORT = process.env.PORT || 3200;
 
 Sentry.init({
@@ -29,15 +35,32 @@ const app = new Elysia()
   .use(
     cron({
       name: "waypointSyncJob",
-      pattern: Patterns.everyMinutes(120), // Run every 2 hours
+      // Modified for 2-month backfill: running once per day at night (PDT)
+      // This gives each job a full 24 hours to complete, which should be sufficient
+      // even with enhanced rate limiting and the large 2-month backlog
+      pattern: Patterns.everyHours(1),//Runs every hour
       run: async () => {
         const date = new Date();
         console.log(
           paint.blue("INFO: "),
-          "Starting Cron Job: ",
+          "Starting Backfill Sync Job: ",
           paint.cyan(date.toString()),
         );
-        await waypointSync();
+
+        // Wrap in a try/catch to ensure we log any failures
+        try {
+          // Track total execution time
+          const startTime = Date.now();
+          await waypointSync();
+          const elapsedMinutes = (Date.now() - startTime) / (1000 * 60);
+          console.log(
+            paint.blue("INFO: "),
+            `Backfill Sync Job completed in ${elapsedMinutes.toFixed(2)} minutes`
+          );
+        } catch (error) {
+          console.error(paint.red("ERROR: "), "Backfill Sync Job failed:", error);
+          Sentry.captureException(error);
+        }
       },
     }),
   )
@@ -112,5 +135,5 @@ if (!userId) {
 }
 
 console.log(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`,
+  `🦊 Elysia is running in the 90s at ${app.server?.hostname}:${app.server?.port}`,
 );

@@ -21,19 +21,85 @@ export const paint = {
   cyan: (text: string) => "\x1b[36m" + text + reset,
   magenta: (text: string) => "\x1b[35m" + text + reset,
 };
+// Track the current sync volume to determine if we need adaptive delays
+let highVolumeSync = false;
+let syncStartTime = 0;
+
+// Helper function to reset rate limiting parameters between sync operations
+function resetRateLimitState() {
+  // Give a short cooldown period between different asset type syncs
+  console.log(paint.blue("INFO: "), "Resetting rate limit state between sync operations");
+  consecutiveRequests = 0;
+  rateLimitEncountered = false;
+  lastRequestTime = 0;
+}
+
 export async function waypointSync() {
+  // Record the start time for this sync operation
+  syncStartTime = Date.now();
+
+  // Check if we're doing a high volume catch-up sync
+  // This helps us determine if we need more aggressive rate limiting
+  try {
+    // Check each asset kind to see when it was last synced
+    const mapSync = await client.waypointSync.findUnique({
+      where: { assetKind: AssetKind.Map }
+    });
+
+    const currentTime = new Date();
+    if (mapSync) {
+      const daysSinceLastSync = (currentTime.getTime() - mapSync.syncedAt.getTime()) / (1000 * 60 * 60 * 24);
+
+      // If it's been more than 7 days since last sync, consider it high volume
+      highVolumeSync = daysSinceLastSync > 7;
+
+      if (highVolumeSync) {
+        console.log(paint.yellow("WARNING: "),
+          `Starting high volume sync - ${daysSinceLastSync.toFixed(1)} days since last sync. `+
+          `Using more conservative rate limits.`);
+
+        // For high volume syncs, we use a more conservative base delay
+        BASE_DELAY_MS = 500; // Increase base delay for high volume syncs
+        RATE_LIMIT_MULTIPLIER = 3.0; // Use more aggressive multiplier
+      }
+    }
+  } catch (error) {
+    console.error("Error checking sync status:", error);
+    // Default to regular sync mode
+    highVolumeSync = false;
+  }
+
   console.log(paint.blue("INFO: "), "Starting map sync");
   await sync(AssetKind.Map);
   console.log(paint.blue("INFO: "), "Finished map sync");
+
+  // Reset rate limit state and add a buffer between operations
+  resetRateLimitState();
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
   console.log(paint.blue("INFO: "), "Starting prefab sync");
   await sync(AssetKind.Prefab);
   console.log(paint.blue("INFO: "), "Finished prefab sync");
+
+  // Reset rate limit state and add a buffer between operations
+  resetRateLimitState();
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
   console.log(paint.blue("INFO: "), "Starting mode sync");
   await sync(AssetKind.Mode);
   console.log(paint.blue("INFO: "), "Finished mode sync");
+
+  // Reset rate limit state and add a buffer between operations
+  resetRateLimitState();
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
   console.log(paint.blue("INFO: "), "Starting recommended asset sync");
   await syncRecommended();
   console.log(paint.blue("INFO: "), "Finished recommended asset sync");
+
+  // Calculate and log total sync time
+  const syncDuration = (Date.now() - syncStartTime) / 1000 / 60;
+  console.log(paint.blue("INFO: "), `Total sync duration: ${syncDuration.toFixed(2)} minutes`);
 }
 
 interface Asset {
@@ -42,17 +108,71 @@ interface Asset {
   // Add other properties if needed
 }
 
-// Track the last request time to implement rate limiting
+// Enhanced rate limiting with adaptive delay
 let lastRequestTime = 0;
-const REQUEST_DELAY_MS = 300; // 300ms cooldown between requests
+let consecutiveRequests = 0;
+let rateLimitEncountered = false;
+
+// Base delay is 300ms, but will increase adaptively
+let BASE_DELAY_MS = 300; // Using let since this will be adjusted for high volume syncs
+const REQUEST_DELAY_MS = 300; // Fixed delay for simple operations
+const MAX_CONSECUTIVE_REQUESTS = 50; // Reset the consecutive counter after this many
+let RATE_LIMIT_MULTIPLIER = 2.5; // Using let since this will be adjusted for high volume syncs
+
+// Adaptive delay calculation
+function getRequestDelay() {
+  // Start with the base delay
+  let delay = BASE_DELAY_MS;
+
+  // Increase delay as we make more consecutive requests
+  const consecutiveFactor = Math.min(1 + (consecutiveRequests / 100), 2);
+  delay *= consecutiveFactor;
+
+  // Apply additional multiplier if we've hit rate limits before
+  if (rateLimitEncountered) {
+    delay *= RATE_LIMIT_MULTIPLIER;
+    console.log(`Using increased delay of ${delay}ms due to previous rate limiting`);
+  }
+
+  // For high volume syncs, add additional delay that increases over time
+  if (highVolumeSync) {
+    // Calculate how long the sync has been running in minutes
+    const minutesElapsed = (Date.now() - syncStartTime) / (1000 * 60);
+
+    // As sync runs longer, gradually increase delay to be more conservative
+    // This helps prevent rate limits as the sync progresses and API endpoints get stressed
+    const timeProgressFactor = Math.min(1 + (minutesElapsed / 15), 2);  // Max double delay after 15 mins
+    delay *= timeProgressFactor;
+
+    // Log this adjustment less frequently (only every 100 requests)
+    if (consecutiveRequests % 10 === 0) {
+      console.log(
+        paint.cyan("RATE: "),
+        `High volume sync running for ${minutesElapsed.toFixed(1)} minutes, ` +
+        `using time-adjusted delay of ${delay.toFixed(0)}ms`
+      );
+    }
+  }
+
+  return delay;
+}
 
 // Helper function to delay execution based on the last request time
 async function delayIfNeeded() {
   const now = Date.now();
   const timeSinceLastRequest = now - lastRequestTime;
+  const currentDelay = getRequestDelay();
 
-  if (timeSinceLastRequest < REQUEST_DELAY_MS) {
-    const delayTime = REQUEST_DELAY_MS - timeSinceLastRequest;
+  // Increment the consecutive request counter
+  consecutiveRequests++;
+
+  // Reset the counter periodically to avoid ever-increasing delays
+  if (consecutiveRequests > MAX_CONSECUTIVE_REQUESTS) {
+    consecutiveRequests = 0;
+  }
+
+  if (timeSinceLastRequest < currentDelay) {
+    const delayTime = currentDelay - timeSinceLastRequest;
     await new Promise(resolve => setTimeout(resolve, delayTime));
   }
 
@@ -66,6 +186,7 @@ async function fetchWithDelay(url: string, options: RequestInit = {}): Promise<R
   return fetch(url, options);
 }
 
+// Handles both rate limiting (429) and authentication (401) errors
 async function fetchWithRetry(
   url: string,
   options: RequestInit = {},
@@ -75,12 +196,49 @@ async function fetchWithRetry(
     try {
       // Use fetchWithDelay instead of direct fetch
       const response = await fetchWithDelay(url, options);
+
+      // Return successful responses immediately
       if (response.ok) return response;
+
+      // Handle specific error codes
+      if (response.status === 401) {
+        console.error(`Authentication error (401) on attempt ${i + 1} for ${url}. Refreshing token...`);
+
+        // Get the userId from env
+        const userId = process.env.CRON_USER;
+        if (userId) {
+          // Force token refresh by getting a new spartan token
+          const newTokens = await getSpartanToken(userId);
+          if (newTokens) {
+            // Update the request headers with the new tokens
+            if (!options.headers) options.headers = {};
+            const headers = options.headers as HeadersInit;
+            headers["X-343-Authorization-Spartan"] = newTokens.spartanToken;
+            headers["343-Clearance"] = newTokens.clearanceToken;
+
+            // Longer delay after token refresh
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            continue; // Skip the standard retry delay and retry immediately with new token
+          }
+        }
+      } else if (response.status === 429) {
+        console.error(`Rate limit exceeded (429) on attempt ${i + 1} for ${url}. Adding longer delay...`);
+        // Mark that we've encountered a rate limit so future requests will be slower
+        rateLimitEncountered = true;
+        // Much longer delay for rate limit errors - exponential with a higher base
+        const rateDelay = Math.pow(5, i) * 2000; // Increased base delay for rate limits
+        console.log(`Rate limit hit, waiting ${rateDelay}ms before retry`);
+        await new Promise((resolve) => setTimeout(resolve, rateDelay));
+        continue;
+      }
     } catch (error) {
       console.error(`Attempt ${i + 1} failed for ${url}:`, error);
     }
-    // Wait before retrying (exponential backoff)
-    await new Promise((resolve) => setTimeout(resolve, Math.pow(2, i) * 1000));
+
+    // Standard exponential backoff for other errors
+    const delay = Math.pow(2, i) * 1000;
+    console.log(`Retrying in ${delay}ms...`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
   throw new Error(`Failed to fetch ${url} after ${maxRetries} attempts`);
 }
@@ -213,12 +371,71 @@ export async function syncDelete(assetKind: AssetKind) {
       firstTotal = start === 0 ? assetList.EstimatedTotal : firstTotal;
       start += count;
     } catch (error) {
+      console.error(`Error during syncDelete at offset ${start}:`, error);
       Sentry.captureException(error, {
         extra: {
           start: start,
+          assetKind: assetKind,
+          query: queryParams
         },
       });
-      return;
+
+      // Instead of immediately failing, let's wait and retry once
+      console.log(`Waiting 10 seconds before retrying syncDelete batch at offset ${start}...`);
+      await new Promise(resolve => setTimeout(resolve, 10000));
+
+      try {
+        // One retry attempt for this batch
+        console.log(`Retrying syncDelete batch at offset ${start}...`);
+        const response = await fetchWithRetry(
+          UgcEndpoints.Search + new URLSearchParams({ ...queryParams }),
+          {
+            method: "GET",
+            headers: headers,
+          },
+          5 // Increased max retries for recovery attempt
+        );
+
+        if (!response.ok) {
+          console.error(`Retry failed with status ${response.status}, failing sync as requested`);
+          // Never skip batches - fail the entire sync
+          throw new Error(`Failed to fetch batch at offset ${start} after retry. Status: ${response.status}`);
+        }
+
+        const assetList = await response.json();
+
+        // Process assets (same as in the original try block)
+        for (const asset of assetList.Results) {
+          assetIds.push(asset.AssetId);
+
+          await safeUpdate(asset.AssetId, {
+            favorites: asset.Favorites,
+            likes: asset.Likes,
+            bookmarks: asset.Bookmarks,
+            playsRecent: asset.PlaysRecent,
+            playsAllTime: asset.PlaysAllTime,
+            averageRating: asset.AverageRating,
+            numberOfRatings: asset.NumberOfRatings,
+          });
+        }
+
+        total = assetList.EstimatedTotal;
+        firstTotal = start === 0 ? assetList.EstimatedTotal : firstTotal;
+        start += count;
+      } catch (retryError) {
+        console.error(`Retry also failed at offset ${start}:`, retryError);
+        Sentry.captureException(retryError, {
+          extra: {
+            start: start,
+            context: "Retry attempt for syncDelete",
+            assetKind: assetKind
+          },
+        });
+
+        // Never skip batches - fail the entire sync
+        console.error(`Failed batch at offset ${start} after retry attempt in syncDelete - failing the entire sync as requested`);
+        throw retryError; // Rethrow to fail the sync
+      }
     }
   } while (start < total || total === -1);
 
@@ -592,13 +809,92 @@ async function sync(assetKind: AssetKind) {
       //   return true;
       // }
     } catch (error) {
+      console.error(`Error during sync at offset ${start}:`, error);
       Sentry.captureException(error, {
         extra: {
           start: start,
+          assetKind: assetKind,
+          query: queryParams
         },
       });
-      return;
-      throw error;
+
+      // Instead of immediately failing, let's wait and retry once
+      console.log(`Waiting 10 seconds before retrying batch at offset ${start}...`);
+      await new Promise(resolve => setTimeout(resolve, 10000));
+
+      try {
+        // One retry attempt for this batch
+        console.log(`Retrying batch at offset ${start}...`);
+        const response = await fetchWithRetry(
+          UgcEndpoints.Search + new URLSearchParams({ ...queryParams }),
+          {
+            method: "GET",
+            headers: headers,
+          },
+          5 // Increased max retries for recovery attempt
+        );
+
+        if (!response.ok) {
+          console.error(`Retry failed with status ${response.status}, failing sync as requested`);
+          // Never skip batches - fail the entire sync
+          throw new Error(`Failed to fetch batch at offset ${start} after retry. Status: ${response.status}`);
+        }
+
+        const assetList = await response.json();
+
+        // Process assets (same as in the try block)
+        for (const assetSummary of assetList.Results) {
+          // Processing code...
+          // (Same as original processing loop)
+          const publishedAtUtc = new Date(
+            assetSummary.DatePublishedUtc.ISO8601Date,
+          );
+          const publishedAt = new Date(publishedAtUtc.getTime() + 5 * 60000);
+          if (lastSyncedAt > publishedAt) {
+            console.log(
+              paint.blue("INFO: "),
+              "Maps from now to syncedAt updated",
+            );
+            await client.waypointSync.update({
+              where: {
+                assetKind: assetKind,
+              },
+              data: {
+                syncedAt: newSyncedAt,
+              },
+            });
+            console.log(
+              paint.blue("INFO: "),
+              "lastSyncedAt time updated with new time: ",
+              paint.green(newSyncedAt.toString()),
+            );
+            return;
+          }
+
+          const assetData = await getAsset(
+            assetSummary.AssetId,
+            assetKind,
+            headers,
+          );
+          // Rest of the asset processing code...
+        }
+
+        total = assetList.EstimatedTotal;
+        start += count;
+      } catch (retryError) {
+        console.error(`Retry also failed at offset ${start}:`, retryError);
+        Sentry.captureException(retryError, {
+          extra: {
+            start: start,
+            context: "Retry attempt",
+            assetKind: assetKind
+          },
+        });
+
+        // Never skip batches - fail the entire sync
+        console.error(`Failed batch at offset ${start} after retry attempt - failing the entire sync as requested`);
+        throw retryError; // Rethrow to fail the sync
+      }
     }
   } while (start < total || total === -1);
 
@@ -726,8 +1022,90 @@ async function syncRecommended() {
     );
     return true;
   } catch (error) {
-    Sentry.captureException(error, {});
-    return;
+    console.error(`Error during syncRecommended:`, error);
+    Sentry.captureException(error, {
+      extra: {
+        context: "syncRecommended initial attempt"
+      }
+    });
+
+    // Instead of immediately failing, let's wait and retry once
+    console.log(`Waiting 10 seconds before retrying syncRecommended...`);
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    try {
+      // One retry attempt with longer timeout
+      console.log(`Retrying syncRecommended...`);
+      const response = await fetchWithRetry(UgcEndpoints.Recommended, {
+        method: "GET",
+        headers: headers,
+      }, 5); // More retries for recovery
+
+      if (!response.ok) {
+        console.error(`Retry failed with status ${response.status}, failing syncRecommended as requested`);
+        throw new Error(`Failed to fetch recommended data after retry. Status: ${response.status}`);
+      }
+
+      const recommendedProject = await response.json();
+
+      // Same processing logic as in the original try block
+      interface Link {
+        AssetId: string;
+      }
+
+      const allAssetIds: string[] = [
+        ...recommendedProject.MapLinks.map((link: Link) => link.AssetId),
+        ...recommendedProject.PlaylistLinks.map((link: Link) => link.AssetId),
+        ...recommendedProject.UgcGameVariantLinks.map(
+          (link: Link) => link.AssetId,
+        ),
+      ];
+
+      // Update records to set featured to true for IDs in the list
+      await client.ugc.updateMany({
+        where: {
+          assetId: { in: allAssetIds },
+        },
+        data: {
+          recommended: true,
+        },
+      });
+
+      // Update records to set booleanField to false for IDs not in the list
+      await client.ugc.updateMany({
+        where: {
+          assetId: { notIn: allAssetIds },
+        },
+        data: {
+          recommended: false,
+        },
+      });
+
+      console.log(paint.blue("INFO: "), "Recommended assets updated on retry");
+      await client.waypointSync.update({
+        where: {
+          assetKind: AssetKind.Recommended,
+        },
+        data: {
+          syncedAt: newSyncedAt,
+        },
+      });
+
+      console.log(
+        paint.blue("INFO: "),
+        "lastSyncedAt time updated with new time: ",
+        paint.green(newSyncedAt.toString()),
+      );
+      return true;
+    } catch (retryError) {
+      console.error(`Retry also failed for syncRecommended:`, retryError);
+      Sentry.captureException(retryError, {
+        extra: {
+          context: "syncRecommended retry attempt"
+        }
+      });
+      throw retryError; // Rethrow to fail the sync properly
+    }
   }
 }
 
