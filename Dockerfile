@@ -1,5 +1,5 @@
 # Build stage
-FROM oven/bun:1.1.29 AS build
+FROM oven/bun:1.2 AS build
 
 # Install Node.js (required for Prisma)
 RUN apt-get update && apt-get install -y curl && \
@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y curl && \
     apt-get install -y nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update -y && apt-get install -y openssl
 
 WORKDIR /app
 
@@ -36,7 +38,7 @@ RUN bun build \
     ./src/index.ts
 
 # Production stage
-FROM gcr.io/distroless/cc AS production
+FROM oven/bun:1.2 AS production
 
 WORKDIR /app
 
