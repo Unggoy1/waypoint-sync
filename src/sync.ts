@@ -42,6 +42,30 @@ interface Asset {
   // Add other properties if needed
 }
 
+// Track the last request time to implement rate limiting
+let lastRequestTime = 0;
+const REQUEST_DELAY_MS = 300; // 300ms cooldown between requests
+
+// Helper function to delay execution based on the last request time
+async function delayIfNeeded() {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+
+  if (timeSinceLastRequest < REQUEST_DELAY_MS) {
+    const delayTime = REQUEST_DELAY_MS - timeSinceLastRequest;
+    await new Promise(resolve => setTimeout(resolve, delayTime));
+  }
+
+  // Update the last request time
+  lastRequestTime = Date.now();
+}
+
+// Enhanced fetch function with rate limiting and retry
+async function fetchWithDelay(url: string, options: RequestInit = {}): Promise<Response> {
+  await delayIfNeeded();
+  return fetch(url, options);
+}
+
 async function fetchWithRetry(
   url: string,
   options: RequestInit = {},
@@ -49,7 +73,8 @@ async function fetchWithRetry(
 ): Promise<Response> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(url, options);
+      // Use fetchWithDelay instead of direct fetch
+      const response = await fetchWithDelay(url, options);
       if (response.ok) return response;
     } catch (error) {
       console.error(`Attempt ${i + 1} failed for ${url}:`, error);
@@ -134,7 +159,7 @@ export async function syncDelete(assetKind: AssetKind) {
     };
 
     try {
-      const response = await fetch(
+      const response = await fetchWithDelay(
         UgcEndpoints.Search + new URLSearchParams({ ...queryParams }),
         {
           method: "GET",
@@ -212,9 +237,24 @@ export async function syncDelete(assetKind: AssetKind) {
   });
 
   console.log("results2: ", results.length);
-  const verificationResults = await Promise.all(
-    results.map(async (result) => await verifyAsset(result.assetId, assetKind)),
-  );
+
+  // Batch verification with rate limiting
+  const verificationResults: boolean[] = [];
+  const batchSize = 5; // Process in batches of 5
+
+  for (let i = 0; i < results.length; i += batchSize) {
+    const batch = results.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (result) => await verifyAsset(result.assetId, assetKind))
+    );
+    verificationResults.push(...batchResults);
+
+    // Add delay between batches if there are more to process
+    if (i + batchSize < results.length) {
+      await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS * 2));
+    }
+  }
+
   const assetIdsToDelete = results.filter(
     (_, index) => !verificationResults[index],
   );
@@ -321,7 +361,7 @@ async function sync(assetKind: AssetKind) {
     };
 
     try {
-      const response = await fetch(
+      const response = await fetchWithDelay(
         UgcEndpoints.Search + new URLSearchParams({ ...queryParams }),
         {
           method: "GET",
@@ -397,7 +437,15 @@ async function sync(assetKind: AssetKind) {
           emblemPath: string;
         }[] = [];
         let adminGamertagStartsWithNumber = false;
-        for (const gamertag of gamertags) {
+        // Process gamertags one by one with delay between each
+        for (let i = 0; i < gamertags.length; i++) {
+          const gamertag = gamertags[i];
+
+          // Add a short delay between each contributor to avoid rate limiting
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
+          }
+
           const appearance = await getAppearance(
             gamertag.xuid,
             headers,
@@ -611,7 +659,7 @@ async function syncRecommended() {
   const lastSyncedAt = waypointSync.syncedAt;
 
   try {
-    const response = await fetch(UgcEndpoints.Recommended, {
+    const response = await fetchWithDelay(UgcEndpoints.Recommended, {
       method: "GET",
       headers: headers,
     });
@@ -704,7 +752,7 @@ async function getAsset(
       break;
   }
   try {
-    const response = await fetch(endpoint + assetId, {
+    const response = await fetchWithDelay(endpoint + assetId, {
       method: "GET",
       headers: headers,
     });
@@ -739,7 +787,7 @@ async function getGamertags(
       return xuid.substring(5, xuid.length - 1);
     });
 
-    const response = await fetch(
+    const response = await fetchWithDelay(
       UgcEndpoints.Gamertags + `xuids=${rawXuids.join(",")}`,
       {
         method: "GET",
@@ -771,7 +819,7 @@ async function getAppearance(
   assetId: string,
 ) {
   try {
-    const response = await fetch(
+    const response = await fetchWithDelay(
       UgcEndpoints.Appearance1 + `xuid(${xuid})` + UgcEndpoints.Appearance2,
       {
         method: "GET",
@@ -795,7 +843,7 @@ async function getAppearance(
 
     const result = await response.json();
 
-    const emblemResponse = await fetch(
+    const emblemResponse = await fetchWithDelay(
       UgcEndpoints.Emblem + result.Appearance.Emblem.EmblemPath,
       {
         method: "GET",
