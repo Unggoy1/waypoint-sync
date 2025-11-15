@@ -922,6 +922,15 @@ async function sync(assetKind: AssetKind) {
             return;
           }
 
+          // Check if this AssetID is in the skip list (retry path)
+          if (skipList.has(assetSummary.AssetId)) {
+            console.log(
+              paint.yellow("SKIPPED: "),
+              `Asset ${paint.cyan(assetSummary.AssetId)} (${assetKind}) is in skip list - skipping`
+            );
+            continue;
+          }
+
           const assetData = await getAsset(
             assetSummary.AssetId,
             assetKind,
