@@ -2,8 +2,10 @@ import { client } from "./lucia";
 import { getSpartanToken } from "./authTools";
 import { Prisma } from "@prisma/client";
 import * as Sentry from "@sentry/bun";
-import { writeFile } from "fs/promises";
+import { writeFile, readFile } from "fs/promises";
 import { JsonValue } from "@prisma/client/runtime/library";
+import { existsSync } from "fs";
+import path from "path";
 
 const reset = "\x1b[0m";
 
@@ -21,6 +23,46 @@ export const paint = {
   cyan: (text: string) => "\x1b[36m" + text + reset,
   magenta: (text: string) => "\x1b[35m" + text + reset,
 };
+
+// Skip list for buggy AssetIDs that appear in search but fail on individual fetch
+let skipList = new Set<string>();
+
+// Load skip list from JSON file
+async function loadSkipList(): Promise<void> {
+  try {
+    const skipListPath = path.join(process.cwd(), "skiplist.json");
+
+    if (!existsSync(skipListPath)) {
+      console.log(paint.yellow("WARNING: "), "skiplist.json not found. No assets will be skipped.");
+      return;
+    }
+
+    const fileContent = await readFile(skipListPath, "utf-8");
+    const skipListData = JSON.parse(fileContent);
+
+    if (skipListData.assetIds && Array.isArray(skipListData.assetIds)) {
+      skipList = new Set(skipListData.assetIds);
+      console.log(paint.blue("INFO: "), `Loaded skip list with ${skipList.size} AssetID(s)`);
+
+      if (skipList.size > 0) {
+        console.log(paint.yellow("WARNING: "), "The following AssetIDs will be skipped during sync:");
+        skipListData.assetIds.forEach((id: string) => {
+          console.log(paint.yellow("  - "), id);
+        });
+      }
+    } else {
+      console.log(paint.yellow("WARNING: "), "skiplist.json has invalid format. Expected { assetIds: [...] }");
+    }
+  } catch (error) {
+    console.error(paint.red("ERROR: "), "Failed to load skip list:", error);
+    Sentry.captureException(error);
+    // Continue with empty skip list rather than failing
+  }
+}
+
+// Load skip list on module initialization
+await loadSkipList();
+
 // Track the current sync volume to determine if we need adaptive delays
 let highVolumeSync = false;
 let syncStartTime = 0;
@@ -625,6 +667,15 @@ async function sync(assetKind: AssetKind) {
             paint.green(newSyncedAt.toString()),
           );
           return;
+        }
+
+        // Check if this AssetID is in the skip list
+        if (skipList.has(assetSummary.AssetId)) {
+          console.log(
+            paint.yellow("SKIPPED: "),
+            `Asset ${paint.cyan(assetSummary.AssetId)} (${assetKind}) is in skip list - skipping`
+          );
+          continue;
         }
 
         const assetData = await getAsset(

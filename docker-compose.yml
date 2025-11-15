@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  waypoint-sync:
+    image: christianvaughn/waypoint-sync:latest
+    container_name: waypoint-sync
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    volumes:
+      # Mount skiplist.json to skip buggy AssetIDs without rebuilding
+      # Edit ./skiplist.json on host and restart container to apply changes
+      - ./skiplist.json:/app/skiplist.json

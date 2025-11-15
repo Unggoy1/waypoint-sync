@@ -1,0 +1,4 @@
+{
+  "description": "List of AssetIDs to skip during sync. These are assets that appear in global search but fail when fetching individual details from Halo Waypoint API. Add buggy AssetIDs here to prevent sync failures. Edit this file and restart the container to apply changes.",
+  "assetIds": ["ccb81e1f-ce22-4017-97bb-f46b181eb8f7"]
+}
