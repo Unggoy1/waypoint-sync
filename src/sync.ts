@@ -714,11 +714,25 @@ async function sync(assetKind: AssetKind) {
             await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY_MS));
           }
 
-          const appearance = await getAppearance(
-            gamertag.xuid,
-            headers,
-            assetSummary.AssetId,
-          );
+          let appearance;
+          try {
+            appearance = await getAppearance(
+              gamertag.xuid,
+              headers,
+              assetSummary.AssetId,
+            );
+          } catch (error) {
+            // Use placeholder values if appearance fetch fails
+            console.log(
+              paint.yellow("WARNING: "),
+              `Failed to fetch appearance for contributor ${gamertag.xuid} on asset ${paint.cyan(assetSummary.AssetId)}, using placeholders`
+            );
+            appearance = {
+              serviceTag: "UNKN",
+              emblemPath: "Emblems/classics_one_emblem.png"
+            };
+          }
+
           contributors.push({
             xuid: gamertag.xuid,
             gamertag: gamertag.gamertag,
@@ -1196,7 +1210,10 @@ async function getAsset(
     });
 
     if (!response.ok) {
-      //TODO add logging saying failed to get asset, and include asset id, and kind
+      console.error(
+        paint.red("ERROR: "),
+        `Failed to fetch asset ${paint.cyan(assetId)} (${assetKind}) - Status: ${response.status}`
+      );
       Sentry.captureMessage(`Error: Failed to fetch asset`, {
         extra: {
           endpoint: endpoint,
@@ -1234,6 +1251,10 @@ async function getGamertags(
     );
 
     if (!response.ok) {
+      console.error(
+        paint.red("ERROR: "),
+        `Failed to fetch gamertags for asset ${paint.cyan(assetId)} - Status: ${response.status}`
+      );
       Sentry.captureMessage(`Error: Failed to fetch gamertags`, {
         extra: {
           endpoint: UgcEndpoints.Gamertags,
@@ -1265,6 +1286,10 @@ async function getAppearance(
       },
     );
     if (!response.ok) {
+      console.error(
+        paint.red("ERROR: "),
+        `Failed to fetch appearance for asset ${paint.cyan(assetId)} (xuid: ${xuid}) - Status: ${response.status}`
+      );
       Sentry.captureMessage(`Error: Failed to fetch appearance`, {
         extra: {
           endpoint:
@@ -1290,16 +1315,20 @@ async function getAppearance(
     );
 
     if (!emblemResponse.ok) {
+      console.error(
+        paint.red("ERROR: "),
+        `Failed to fetch emblem for asset ${paint.cyan(assetId)} (xuid: ${xuid}) - Status: ${emblemResponse.status}`
+      );
       Sentry.captureMessage(`Error: Failed to fetch emblem`, {
         extra: {
           endpoint: UgcEndpoints.Emblem,
           emblemPath: result.Appearance.Emblem.EmblemPath,
-          code: response.status,
+          code: emblemResponse.status,
           xuid: xuid,
           assetId: assetId,
         },
       });
-      throw new Error(`failed to fetch data. Status: ${response.status}`);
+      throw new Error(`failed to fetch emblem. Status: ${emblemResponse.status}`);
     }
     const emblem = await emblemResponse.json();
     let emblemPath = emblem.CommonData.DisplayPath.Media.MediaUrl.Path;
