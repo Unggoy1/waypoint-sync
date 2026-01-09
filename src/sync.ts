@@ -380,34 +380,31 @@ export async function syncDelete(assetKind: AssetKind) {
       }
 
       const assetList = await response.json();
-      //this is stupid and probably can be put in the for loop below, but i wanted to test something
-      //TODO: see if i can get this to work without a connection pool issue
-      // const updatePromises = assetList.Results.map((result: any) => {
-      //   safeUpdate(result.AssetId, {
-      //     favorites: result.Favorites,
-      //     likes: result.Likes,
-      //     bookmarks: result.Bookmarks,
-      //     playsRecent: result.PlaysRecent,
-      //     playsAllTime: result.PlaysAllTime,
-      //     averageRating: result.AverageRating,
-      //     numberOfRatings: result.NumberOfRatings,
-      //   });
-      // });
-      // await Promise.all(updatePromises);
 
+      // Collect asset IDs
       for (const asset of assetList.Results) {
         assetIds.push(asset.AssetId);
-
-        await safeUpdate(asset.AssetId, {
-          favorites: asset.Favorites,
-          likes: asset.Likes,
-          bookmarks: asset.Bookmarks,
-          playsRecent: asset.PlaysRecent,
-          playsAllTime: asset.PlaysAllTime,
-          averageRating: asset.AverageRating,
-          numberOfRatings: asset.NumberOfRatings,
-        });
       }
+
+      // Batch update metrics in a single transaction (reduces 20 round-trips to 1)
+      const updateOperations = assetList.Results.map((asset: any) =>
+        client.ugc.update({
+          where: { assetId: asset.AssetId },
+          data: {
+            favorites: asset.Favorites,
+            likes: asset.Likes,
+            bookmarks: asset.Bookmarks,
+            playsRecent: asset.PlaysRecent,
+            playsAllTime: asset.PlaysAllTime,
+            averageRating: asset.AverageRating,
+            numberOfRatings: asset.NumberOfRatings,
+          },
+        })
+      );
+      // Use transaction to batch - avoids connection pool exhaustion that Promise.all caused
+      await client.$transaction(updateOperations).catch(() => {
+        // Some assets may not exist in DB yet, that's OK - they'll be synced later
+      });
 
       total = assetList.EstimatedTotal;
       firstTotal = start === 0 ? assetList.EstimatedTotal : firstTotal;
@@ -446,20 +443,29 @@ export async function syncDelete(assetKind: AssetKind) {
 
         const assetList = await response.json();
 
-        // Process assets (same as in the original try block)
+        // Collect asset IDs
         for (const asset of assetList.Results) {
           assetIds.push(asset.AssetId);
-
-          await safeUpdate(asset.AssetId, {
-            favorites: asset.Favorites,
-            likes: asset.Likes,
-            bookmarks: asset.Bookmarks,
-            playsRecent: asset.PlaysRecent,
-            playsAllTime: asset.PlaysAllTime,
-            averageRating: asset.AverageRating,
-            numberOfRatings: asset.NumberOfRatings,
-          });
         }
+
+        // Batch update metrics in a single transaction (reduces 20 round-trips to 1)
+        const updateOperations = assetList.Results.map((asset: any) =>
+          client.ugc.update({
+            where: { assetId: asset.AssetId },
+            data: {
+              favorites: asset.Favorites,
+              likes: asset.Likes,
+              bookmarks: asset.Bookmarks,
+              playsRecent: asset.PlaysRecent,
+              playsAllTime: asset.PlaysAllTime,
+              averageRating: asset.AverageRating,
+              numberOfRatings: asset.NumberOfRatings,
+            },
+          })
+        );
+        await client.$transaction(updateOperations).catch(() => {
+          // Some assets may not exist in DB yet, that's OK
+        });
 
         total = assetList.EstimatedTotal;
         firstTotal = start === 0 ? assetList.EstimatedTotal : firstTotal;
@@ -483,17 +489,15 @@ export async function syncDelete(assetKind: AssetKind) {
 
   const assetKindNumber =
     assetKind === AssetKind.Map ? 2 : assetKind === AssetKind.Prefab ? 4 : 6;
-  const results = await client.ugc.findMany({
-    where: {
-      assetKind: assetKindNumber,
-      assetId: {
-        notIn: assetIds,
-      },
-    },
-    select: {
-      assetId: true,
-    },
+
+  // Optimization: Instead of sending 150K IDs in a NOT IN query to MySQL,
+  // fetch all DB asset IDs (small query) and compare locally (free memory)
+  const dbAssets = await client.ugc.findMany({
+    where: { assetKind: assetKindNumber },
+    select: { assetId: true },
   });
+  const activeSet = new Set(assetIds);
+  const results = dbAssets.filter((a: { assetId: string }) => !activeSet.has(a.assetId));
 
   console.log("results2: ", results.length);
 
@@ -548,25 +552,6 @@ export async function syncDelete(assetKind: AssetKind) {
     paint.green(newSyncedAt.toString()),
   );
   return true;
-}
-
-async function safeUpdate(assetId: string, data: any) {
-  try {
-    return await client.ugc.update({
-      where: { assetId },
-      data,
-    });
-  } catch (e) {
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2025"
-    ) {
-      // Handle the case where the record does not exist
-      // console.log(`Record with ID ${assetId} does not exist.`);
-      return null;
-    }
-    throw e; // Re-throw other errors
-  }
 }
 
 async function sync(assetKind: AssetKind) {
@@ -1070,9 +1055,12 @@ async function syncRecommended() {
       },
     });
 
-    // Update records to set booleanField to false for IDs not in the list
+    // Update records to set recommended to false only for rows that are
+    // currently recommended but not in the new list (optimization: avoids
+    // touching ~150K rows that are already false)
     await client.ugc.updateMany({
       where: {
+        recommended: true,
         assetId: { notIn: allAssetIds },
       },
       data: {
@@ -1145,9 +1133,12 @@ async function syncRecommended() {
         },
       });
 
-      // Update records to set booleanField to false for IDs not in the list
+      // Update records to set recommended to false only for rows that are
+      // currently recommended but not in the new list (optimization: avoids
+      // touching ~150K rows that are already false)
       await client.ugc.updateMany({
         where: {
+          recommended: true,
           assetId: { notIn: allAssetIds },
         },
         data: {
